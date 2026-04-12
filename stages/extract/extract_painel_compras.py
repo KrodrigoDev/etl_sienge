@@ -35,8 +35,8 @@ URL_PAINEL = (
 
 
 def extrair_painel_compras(
-    data_inicio: str | None = None,
-    destino: Path | None = None,
+        data_inicio: str | None = None,
+        destino: Path | None = None,
 ) -> Path:
     """
     Executa a extração do painel de compras.
@@ -64,36 +64,25 @@ def extrair_painel_compras(
     destino.mkdir(parents=True, exist_ok=True)
 
     driver = req.get_driver()
-    wdw    = req.waiter(driver)
+    wdw = req.waiter(driver)
 
     try:
-        # ── 1. Login ──────────────────────────────────────────────────────────
-        logger.info("Acessando SIENGE...")
-        driver.get(f"{BASE_URL}/index.jsp")
+        # ── 1. Login e Acesso ao perfil ──────────────────────────────────────────────────────────
+        req.navegacao_inicial(driver, wdw)
 
-        req.aguardar_e_clicar(
-            wdw,
-            (By.CSS_SELECTOR, "#btnEntrarComSiengeID"),
-            "Entrar com SIENGE ID",
-        )
-        sleep(2)
-
-        # ── 2. Seleciona perfil ───────────────────────────────────────────────
-        req.aguardar_e_clicar(
-            wdw,
-            (
-                By.XPATH,
-                '//div[contains(@class,"relative") and contains(@class,"p-6")]'
-                '//button[@tabindex="0"]',
-            ),
-            "Selecionar perfil",
-        )
-        sleep(2)
-
-        # ── 3. Navega para o painel ───────────────────────────────────────────
+        # ── 2. Navega para o painel ───────────────────────────────────────────
         logger.info("Navegando para o painel de compras...")
         driver.get(URL_PAINEL)
         sleep(3)
+
+        # ── 3 Selecionar todas as colunas ───────────────────────────────────
+
+        req.scrollar_pagina(driver)
+
+        logger.info("Selecionando todas as colunas do relatório de compras")
+        req.selecionar_todas_colunas(wdw)
+
+        sleep(1)
 
         # ── 4. Preenche data inicial ──────────────────────────────────────────
         logger.info("Preenchendo data inicial: %s", data_inicio)
@@ -130,7 +119,8 @@ def extrair_painel_compras(
             (By.XPATH, '//li[contains(.,"Todas")]'),
             "Todas as linhas",
         )
-        sleep(10)  # aguarda tabela renderizar todas as linhas
+
+        req.aguardar_carregamento_tabela(driver)
 
         # ── 7. Exporta CSV ────────────────────────────────────────────────────
         logger.info("Exportando CSV...")

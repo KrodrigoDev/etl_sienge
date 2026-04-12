@@ -13,7 +13,6 @@ Responsabilidades:
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from time import sleep, time
 
@@ -27,22 +26,23 @@ from selenium.webdriver.support.wait import WebDriverWait
 
 logger = logging.getLogger(__name__)
 
-BASE_URL   = "https://telesil.sienge.com.br/sienge"
-LOGIN_URL  = f"{BASE_URL}/index.jsp"
-TIMEOUT    = 30   # segundos padrão para WebDriverWait
+BASE_URL = "https://telesil.sienge.com.br/sienge"
+LOGIN_URL = f"{BASE_URL}/index.jsp"
+TIMEOUT = 30  # segundos padrão para WebDriverWait
 DL_TIMEOUT = 120  # segundos máximos para aguardar download
 
+print(Path(__file__).resolve().parents[2])
 
 class SeleniumRequester:
 
     def __init__(self, download_dir: Path | None = None):
 
-        self.project_root = Path(__file__).resolve().parents[3]
+        self.project_root = Path(__file__).resolve().parents[2]
 
         self.path_profile = Path(r"C:\SeleniumPerfil\Edge")
 
         self.download_dir = download_dir or (
-            self.project_root / "stages" / "extract" / "downloads"
+                self.project_root / "stages" / "transform" / "input"
         )
 
         self._create_directories()
@@ -60,10 +60,10 @@ class SeleniumRequester:
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_experimental_option("prefs", {
-            "download.default_directory":  str(self.download_dir),
+            "download.default_directory": str(self.download_dir),
             "download.prompt_for_download": False,
-            "download.directory_upgrade":  True,
-            "safebrowsing.enabled":        True,
+            "download.directory_upgrade": True,
+            "safebrowsing.enabled": True,
         })
         driver = webdriver.Edge(options=options)
         logger.info("Driver Edge iniciado → downloads em %s", self.download_dir)
@@ -82,6 +82,30 @@ class SeleniumRequester:
             logger.info("Sessão salva em %s", self.path_profile)
 
     # ── Helpers genéricos ─────────────────────────────────────────────────────
+    @staticmethod
+    def navegacao_inicial(driver: webdriver.Edge, wdw: WebDriverWait) -> None:
+
+        logger.info("Acessando SIENGE...")
+        driver.get(f"{BASE_URL}/index.jsp")
+
+        SeleniumRequester.aguardar_e_clicar(
+            wdw,
+            (By.CSS_SELECTOR, "#btnEntrarComSiengeID"),
+            "Entrar com SIENGE ID",
+        )
+        sleep(2)
+
+        # ── 2. Seleciona perfil ───────────────────────────────────────────────
+        SeleniumRequester.aguardar_e_clicar(
+            wdw,
+            (
+                By.XPATH,
+                '//div[contains(@class,"relative") and contains(@class,"p-6")]'
+                '//button[@tabindex="0"]',
+            ),
+            "Selecionar perfil",
+        )
+        sleep(2)
 
     @staticmethod
     def waiter(driver: webdriver.Edge, timeout: int = TIMEOUT) -> WebDriverWait:
@@ -89,9 +113,9 @@ class SeleniumRequester:
 
     @staticmethod
     def aguardar_e_clicar(
-        wdw: WebDriverWait,
-        locator: tuple,
-        descricao: str = "",
+            wdw: WebDriverWait,
+            locator: tuple,
+            descricao: str = "",
     ) -> WebElement:
         """Aguarda elemento ficar clicável e clica."""
         elemento = wdw.until(EC.element_to_be_clickable(locator))
@@ -102,10 +126,10 @@ class SeleniumRequester:
 
     @staticmethod
     def preencher_campo(
-        wdw: WebDriverWait,
-        locator: tuple,
-        valor: str,
-        limpar: bool = True,
+            wdw: WebDriverWait,
+            locator: tuple,
+            valor: str,
+            limpar: bool = True,
     ) -> WebElement:
         """Aguarda campo, limpa e preenche com o valor informado."""
         campo = wdw.until(EC.element_to_be_clickable(locator))
@@ -117,24 +141,24 @@ class SeleniumRequester:
 
     @staticmethod
     def aguardar_visivel(
-        wdw: WebDriverWait,
-        locator: tuple,
+            wdw: WebDriverWait,
+            locator: tuple,
     ) -> WebElement:
         """Aguarda elemento ficar visível."""
         return wdw.until(EC.visibility_of_element_located(locator))
 
     @staticmethod
     def aguardar_presenca(
-        wdw: WebDriverWait,
-        locator: tuple,
+            wdw: WebDriverWait,
+            locator: tuple,
     ) -> WebElement:
         """Aguarda elemento estar presente no DOM."""
         return wdw.until(EC.presence_of_element_located(locator))
 
     def aguardar_download(
-        self,
-        extensao: str = ".csv",
-        timeout: int = DL_TIMEOUT,
+            self,
+            extensao: str = ".csv",
+            timeout: int = DL_TIMEOUT,
     ) -> Path:
         """
         Aguarda até um arquivo com a extensão informada aparecer na pasta
@@ -164,9 +188,9 @@ class SeleniumRequester:
 
     @staticmethod
     def selecionar_opcao_combobox(
-        wdw: WebDriverWait,
-        locator_combobox: tuple,
-        locator_opcao: tuple,
+            wdw: WebDriverWait,
+            locator_combobox: tuple,
+            locator_opcao: tuple,
     ) -> None:
         """Abre um combobox MUI e seleciona uma opção."""
         SeleniumRequester.aguardar_e_clicar(wdw, locator_combobox)
@@ -213,4 +237,83 @@ class SeleniumRequester:
             wdw,
             (By.XPATH, '//button[.//text()="Exportar"]'),
             "Exportar",
+        )
+
+    @staticmethod
+    def selecionar_todas_colunas(wdw: WebDriverWait) -> None:
+        locator_colunas = (
+            By.CSS_SELECTOR,
+            'button[aria-label="Exibir seletor de colunas"]',
+        )
+        locator_mostrar_todas = (
+            By.XPATH,
+            '//button[text()="Mostrar todas"]',
+        )
+
+        # 1. Abre o menu
+        SeleniumRequester.aguardar_e_clicar(wdw, locator_colunas)
+        sleep(1)
+
+        # 2. Clica em Mostrar todas
+        SeleniumRequester.aguardar_e_clicar(wdw, locator_mostrar_todas)
+        sleep(1)
+
+        # 3. Fecha o menu clicando de novo no botão de colunas
+        SeleniumRequester.aguardar_e_clicar(wdw, locator_colunas)
+        sleep(1)
+
+    @staticmethod
+    def aguardar_carregamento_tabela(
+            driver: webdriver.Edge,
+            timeout: int = 120,
+    ) -> None:
+        """
+        Aguarda o spinner de carregamento da MUI DataGrid desaparecer,
+        indicando que todas as linhas foram renderizadas.
+
+        Estratégia em duas fases:
+          1. Aguarda o spinner aparecer (confirma que o carregamento iniciou)
+          2. Aguarda o spinner desaparecer (confirma que o carregamento terminou)
+
+        Deve ser chamado após selecionar "Todas" as linhas e antes de exportar.
+
+        Recebe o driver diretamente (não o WebDriverWait) para criar
+        WebDriverWaits com timeouts distintos para cada fase.
+
+        O locator usa apenas classes semânticas do MUI (não as classes geradas
+        como css-xxx) para garantir estabilidade entre versões do SIENGE.
+        """
+        locator_spinner = (
+            By.CSS_SELECTOR,
+            ".MuiDataGrid-overlay .MuiCircularProgress-root",
+        )
+
+        # Fase 1: aguarda o spinner aparecer — timeout curto (10s)
+        # Após clicar em "Todas", o SIENGE demora alguns segundos para
+        # iniciar o carregamento e exibir o spinner.
+        try:
+            WebDriverWait(driver, 10).until(
+                EC.visibility_of_element_located(locator_spinner)
+            )
+            logger.info("Spinner detectado — carregamento em andamento...")
+        except Exception:
+            # Se o spinner não aparecer em 10s, os dados já podem ter
+            # sido carregados instantaneamente (tabelas pequenas).
+            logger.info("Spinner não detectado — tabela já pode estar carregada.")
+
+        # Fase 2: aguarda o spinner desaparecer — timeout longo
+        # Para tabelas grandes (27k+ linhas) o carregamento pode levar minutos.
+        logger.info("Aguardando conclusão do carregamento da tabela...")
+        WebDriverWait(driver, timeout).until(
+            EC.invisibility_of_element_located(locator_spinner)
+        )
+        logger.info("Tabela carregada — spinner sumiu.")
+
+    @staticmethod
+    def scrollar_pagina(driver: webdriver.Edge) -> None:
+        container = driver.find_element(By.ID, "main")
+
+        driver.execute_script(
+            "arguments[0].scrollBy(0, 300)",
+            container
         )

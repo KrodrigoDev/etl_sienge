@@ -22,7 +22,9 @@ from datetime import date
 from pathlib import Path
 from time import sleep
 
+import pandas as pd
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 
 from src.drivers.selenium_requester import BASE_URL, SeleniumRequester
 
@@ -32,13 +34,12 @@ logger = logging.getLogger(__name__)
 # Ajuste o hash se a URL do seu ambiente for diferente
 URL_ESTOQUE = (
     f"{BASE_URL}/8/index.html"
-    "#/suprimentos/estoque/estoque-obras"
+    "#/suprimentos/estoque/relatorios/posicoes-estoque"
 )
 
 
 def extrair_estoque(
-    destino: Path | None = None,
-    situacao: str = "ATIVO",
+        destino: Path | None = None
 ) -> Path:
     """
     Executa a extração do relatório de estoque de obras.
@@ -63,62 +64,84 @@ def extrair_estoque(
     destino.mkdir(parents=True, exist_ok=True)
 
     driver = req.get_driver()
-    wdw    = req.waiter(driver)
+    wdw = req.waiter(driver)
 
     try:
-        # ── 1. Login ──────────────────────────────────────────────────────────
-        logger.info("Acessando SIENGE...")
-        driver.get(f"{BASE_URL}/index.jsp")
+        # ── 1. Login e acesso ao perfil ──────────────────────────────────────────────────────────
+        req.navegacao_inicial(driver, wdw)
 
-        req.aguardar_e_clicar(
-            wdw,
-            (By.CSS_SELECTOR, "#btnEntrarComSiengeID"),
-            "Entrar com SIENGE ID",
-        )
-        sleep(2)
-
-        # ── 2. Seleciona perfil ───────────────────────────────────────────────
-        req.aguardar_e_clicar(
-            wdw,
-            (
-                By.XPATH,
-                '//div[contains(@class,"relative") and contains(@class,"p-6")]'
-                '//button[@tabindex="0"]',
-            ),
-            "Selecionar perfil",
-        )
-        sleep(2)
-
-        # ── 3. Navega para o relatório de estoque ─────────────────────────────
+        # ── 2. Navega para o relatório de estoque ─────────────────────────────
         logger.info("Navegando para o estoque de obras...")
         driver.get(URL_ESTOQUE)
-        sleep(3)
+        sleep(2)
 
-        # ── 4. Aplica filtro de situação (se disponível na tela) ──────────────
-        # O filtro de situação pode variar conforme a versão do SIENGE.
-        # Se não existir na URL do seu ambiente, remova este bloco.
-        if situacao and situacao.upper() != "TODOS":
-            logger.info("Aplicando filtro de situação: %s", situacao)
-            try:
-                req.selecionar_opcao_combobox(
-                    wdw,
-                    locator_combobox=(
-                        By.XPATH,
-                        '//label[contains(text(),"Situação")]'
-                        '/following::div[@role="combobox"][1]',
-                    ),
-                    locator_opcao=(
-                        By.XPATH,
-                        f'//li[@role="option" and '
-                        f'translate(text(),"abcdefghijklmnopqrstuvwxyz",'
-                        f'"ABCDEFGHIJKLMNOPQRSTUVWXYZ")="{situacao.upper()}"]',
-                    ),
+        # ──  3. Limpando as obras selecionadas anteriomente  ─────────────────────────────
+
+        req.aguardar_e_clicar(
+            wdw,
+            (By.XPATH, '//input[@placeholder="Pesquisar obra"]'),
+            "Campo Obras",
+        )
+
+        sleep(1.5)
+        logger.info("Verificando se existe filtro de obras para limpar...")
+
+        try:
+            req.aguardar_e_clicar(
+                wdw,
+                (
+                    By.XPATH,
+                    '//button[@aria-label="Limpar"]'
+                ),
+                "Botão Limpar obras",
+            )
+
+            logger.info("Filtro de obras limpo com sucesso.")
+
+        except Exception:
+            logger.info("Nenhum filtro de obras para limpar.")
+
+        # ── 4. Selecionar Obras  ─────────────────────────────
+
+        df_obras = pd.read_csv(req.project_root / 'stages/extract/reference/obras_estoque.csv', sep=';')
+
+        lista_obras = df_obras['cod_obra'].dropna().astype(str).unique().tolist()
+
+        logger.info("Total de obras: %s", len(lista_obras))
+
+        # ── selecionar obras uma a uma ─────────────────────────
+
+        for cod_obra in lista_obras:
+            logger.info("Selecionando obra: %s", cod_obra)
+
+            pesquisar = f"{cod_obra} "
+
+            input_obra = req.aguardar_e_clicar(
+                wdw,
+                (By.XPATH, '//input[@placeholder="Pesquisar obra"]'),
+                "Campo Obras",
+            )
+
+            input_obra.send_keys(pesquisar)
+
+            sleep(1)
+
+            input_obra.send_keys(Keys.CONTROL, "a")
+            input_obra.send_keys(Keys.DELETE)
+
+            req.aguardar_e_clicar(
+                wdw,
+                (
+                    By.XPATH,
+                    f'//li[@role="option" and starts-with(normalize-space(), "{cod_obra} -")]'
                 )
-                sleep(1)
-            except Exception:
-                logger.warning(
-                    "Filtro de situação não encontrado — continuando sem filtrar."
-                )
+            )
+
+            sleep(1)
+
+        # ── 4. Selecionar todas as colunas  ─────────────────────────────
+        logger.info("Selecionando todas as colunas do relatório de estoque")
+        req.selecionar_todas_colunas(wdw)
 
         # ── 5. Consultar ──────────────────────────────────────────────────────
         logger.info("Consultando estoque...")
@@ -134,21 +157,18 @@ def extrair_estoque(
             logger.info("Botão Consultar não encontrado — tela carregou automaticamente.")
 
         # ── 6. Seleciona 'Todas' as linhas (se houver paginação) ─────────────
-        try:
-            paginacao = driver.find_element(
-                By.XPATH, '//div[contains(@class,"MuiTablePagination-select")]'
-            )
-            paginacao.click()
-            sleep(2)
-            req.aguardar_e_clicar(
-                wdw,
-                (By.XPATH, '//li[contains(.,"Todas")]'),
-                "Todas as linhas",
-            )
-            sleep(10)
-        except Exception:
-            logger.info("Paginação não encontrada — assumindo que todos os dados já estão visíveis.")
-            sleep(3)
+        logger.info("Selecionando todas as linhas...")
+        driver.find_element(
+            By.XPATH, '//div[contains(@class,"MuiTablePagination-select")]'
+        ).click()
+        sleep(2)
+
+        req.aguardar_e_clicar(
+            wdw,
+            (By.XPATH, '//li[contains(.,"Todas")]'),
+            "Todas as linhas",
+        )
+        req.aguardar_carregamento_tabela(driver)
 
         # ── 7. Exporta CSV ────────────────────────────────────────────────────
         logger.info("Exportando CSV do estoque...")
@@ -176,4 +196,5 @@ if __name__ == "__main__":
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
     caminho = extrair_estoque()
+
     print(f"Extração concluída: {caminho}")

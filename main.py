@@ -35,10 +35,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ── Caminhos ──────────────────────────────────────────────────────────────────
-ROOT         = Path(__file__).resolve().parent
-DOWNLOAD_DIR = ROOT / "stages" / "extract" / "downloads"
-INPUT_DIR    = ROOT / "stages" / "transform" / "input"
-OUTPUT_DIR   = ROOT / "stages" / "transform" / "output"
+ROOT = Path(__file__).resolve().parent
+INPUT_DIR = ROOT / "stages" / "transform" / "input"
+OUTPUT_DIR = ROOT / "stages" / "transform" / "output"
 
 
 def etapa_extract(data_inicio: str) -> None:
