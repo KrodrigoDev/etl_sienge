@@ -1,6 +1,46 @@
+# =========================
+# Ambientes virtuais
+# =========================
 .env
-.venv
-.idea
-.idea/misc.xml
+.venv/
+venv/
+env/
 
-/.idea
+# =========================
+# IDEs
+# =========================
+.idea/
+.vscode/
+
+# =========================
+# Python
+# =========================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.iml
+
+# =========================
+# Logs e arquivos temporários
+# =========================
+*.log
+*.tmp
+*.temp
+
+# =========================
+# Arquivos do sistema
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# Dados de entrada/saída do ETL
+# =========================
+stages/transform/input/
+stages/transform/output/
+
+# =========================
+# Jupyter (se usar)
+# =========================
+.ipynb_checkpoints/
