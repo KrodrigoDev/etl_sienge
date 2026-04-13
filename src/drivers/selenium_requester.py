@@ -31,7 +31,6 @@ LOGIN_URL = f"{BASE_URL}/index.jsp"
 TIMEOUT = 30  # segundos padrão para WebDriverWait
 DL_TIMEOUT = 120  # segundos máximos para aguardar download
 
-print(Path(__file__).resolve().parents[2])
 
 class SeleniumRequester:
 
