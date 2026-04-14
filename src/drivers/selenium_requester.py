@@ -54,10 +54,15 @@ class SeleniumRequester:
 
     def get_driver(self) -> webdriver.Edge:
         options = Options()
+
         options.add_argument(f"--user-data-dir={self.path_profile}")
         options.add_argument("--profile-directory=Default")
+
+        options.add_argument("--start-maximized")
+
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
+
         options.add_experimental_option("prefs", {
             "download.default_directory": str(self.download_dir),
             "download.prompt_for_download": False,

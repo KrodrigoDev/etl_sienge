@@ -17,12 +17,11 @@ Relacionamentos gerados (todos 1:N, single direction)
   dim_solicitante[id_sol.]      → fato_solicitacao_item[id_solicitante]
   dim_grupo_insumo[id_grupo]    → fato_solicitacao_item[id_grupo]
   dim_grupo_insumo[id_grupo]    → dim_insumo[id_grupo]
-  dim_lead_times[id_lead_time]  → fato_solicitacao_item[id_lead_time]
+  dim_lead_times[id_grupo]  → dim_grupo_insumo[id_grupo]
 """
 
 from __future__ import annotations
 
-from itertools import product
 from pathlib import Path
 
 import pandas as pd
@@ -99,18 +98,23 @@ def executar(input_dir: Path = INPUT_DIR,
     # ── 3. dim_obra ───────────────────────────────────────────────────────────
     print("\n── 3. dim_obra ─────────────────────────────────────────────────────")
 
-    auxiliar_obra = pd.read_csv(reference_dir / 'auxiliar_gabriel.csv', sep=',')
+    auxiliar_obra_gabriel = pd.read_csv(reference_dir / 'auxiliar_gabriel.csv', sep=',')
+
+    # trazer as informações importantes
 
     dim_obra = criar_dimensao(df_painel, ['cod_obra', 'obra'], 'id_obra')
+
     dim_obra = dim_obra.merge(
-        auxiliar_obra[[
-            'Cod. Centro de Custo', 'Classificação 1', 'Classificação 2', 'Tipo de Obra',
+        auxiliar_obra_gabriel[[
+            'Cod. Centro de Custo', 'Classificação 1', 'Classificação 2', 'Tipo de Obra', 'Tipo de Obra 2 '
         ]].rename(columns={
             'Classificação 1': 'filial',
             'Classificação 2': 'classificacao',
             'Tipo de Obra': 'tipo_obra',
+            'Tipo de Obra 2 ': 'tipo_obra_2',
             'Cod. Centro de Custo': '_cod_join',
         }).drop_duplicates(subset='_cod_join'),
+
         left_on='cod_obra', right_on='_cod_join', how='left'
     ).drop(columns='_cod_join', errors='ignore')
 
@@ -147,60 +151,75 @@ def executar(input_dir: Path = INPUT_DIR,
         left_on='id_grupo_auxiliar', right_on='ref_grupo', how='left'
     ).drop(columns=['ref_grupo', 'id_grupo_auxiliar'], errors='ignore')
 
+    colunas_originais_insumo = dim_insumo.columns.to_list()
+
+    df_auxiliar_lead_time = pd.read_excel('../transform/input/reference/Lead Time - Grupos.xlsx', sheet_name='Lead Time', skiprows=6)
+    df_auxiliar_lead_time = df_auxiliar_lead_time.drop(columns=['Unnamed: 0'])
+    df_auxiliar_lead_time.dropna(subset='Cód. Família', inplace=True)
+
+    df_auxiliar_lead_time['id_grupo'] = df_auxiliar_lead_time['Cód. Família'].apply(cod_grupo_to_id)
+
+    dim_insumo = pd.merge(dim_insumo, df_auxiliar_lead_time, how='left', on='id_grupo' )
+
+
     print(f"  dim_insumo: {dim_insumo.shape}")
 
     # ── 5. dim_grupo_insumo ───────────────────────────────────────────────────
     print("\n── 5. dim_grupo_insumo ─────────────────────────────────────────────")
 
     dim_grupo_insumo = (
-        dim_insumo[['id_grupo', 'cod_grupo_de_insumo', 'grupo_de_insumo', 'tipo_grupo']]
+        dim_insumo[['id_grupo', 'cod_grupo_de_insumo', 'grupo_de_insumo', 'tipo_grupo',
+                    'Analista obras privadas', 'Analista Públicas','Analista Filial Sul','Lead Time', 'Curva ABC']]
         .drop_duplicates(subset='id_grupo')
         .dropna(subset=['id_grupo'])
         .sort_values('id_grupo')
         .reset_index(drop=True)
         .copy()
     )
+
+
+    dim_insumo = dim_insumo[colunas_originais_insumo] # após trazer o que importa pra grupo insumos, voltamos ao original em insumo
+    dim_insumo.drop_duplicates(subset='id_insumo', inplace=True)
     print(f"  dim_grupo_insumo: {dim_grupo_insumo.shape}")
 
     # ── 6. dim_lead_times ─────────────────────────────────────────────────────
     print("\n── 6. dim_lead_times ───────────────────────────────────────────────")
 
-    esqueleto = pd.DataFrame([
-        {'id_grupo': int(g), 'tipo_obra': t, 'estado': e}
-        for g, t, e in product(
-            dim_grupo_insumo['id_grupo'].dropna().unique(),
-            TIPOS_OBRA, ESTADOS,
-        )
-    ])
-    dim_lead_times = esqueleto.merge(
-        dim_grupo_insumo[['id_grupo', 'cod_grupo_de_insumo', 'grupo_de_insumo', 'tipo_grupo']],
-        on='id_grupo', how='left'
+    dim_lead_times = dim_grupo_insumo[['id_grupo', 'cod_grupo_de_insumo', 'grupo_de_insumo', 'tipo_grupo',
+                    'Analista obras privadas', 'Analista Públicas','Analista Filial Sul','Lead Time', 'Curva ABC']]
+
+    dim_lead_times = dim_lead_times.melt(
+        id_vars=[
+            'id_grupo',
+            'cod_grupo_de_insumo',
+            'grupo_de_insumo',
+            'tipo_grupo',
+            'Lead Time',
+            'Curva ABC'
+        ],
+        value_vars=[
+            'Analista obras privadas',
+            'Analista Públicas',
+            'Analista Filial Sul'
+        ],
+        var_name='tipo_analista',
+        value_name='analista'
     )
 
-    _comunicado = pd.read_excel(reference_dir / '[Suprimentos] Comunicado Importante.xlsx', header=0)
-    _comunicado.columns = ['grupo_de_insumo_raw', 'analista_privada_AL']
-    _comunicado['id_grupo'] = (
-        _comunicado['grupo_de_insumo_raw'].str.extract(r'^(\d+\.\d+)')[0].apply(cod_grupo_to_id)
-    )
-    _comunicado = _comunicado.drop_duplicates(subset='id_grupo')
-    _map_analista_al = _comunicado.set_index('id_grupo')['analista_privada_AL'].to_dict()
-
-    dim_lead_times['analista'] = dim_lead_times.apply(
-        lambda r: _map_analista_al.get(r['id_grupo'])
-        if r['tipo_obra'] == 'PRIVADA' and r['estado'] == 'AL' else None,
-        axis=1
-    )
-    dim_lead_times['lead_time_dias'] = None
-    dim_lead_times['curva_abc'] = None
-    dim_lead_times['status'] = None
     dim_lead_times.insert(0, 'id_lead_time', range(1, len(dim_lead_times) + 1))
+
+    dim_lead_times.rename(
+        columns={
+        'Lead Time':'lead_time_dias', 'Curva ABC': 'curva_abc'
+        },
+        inplace=True
+    )
     dim_lead_times = dim_lead_times[[
         'id_lead_time', 'id_grupo', 'cod_grupo_de_insumo', 'grupo_de_insumo',
-        'tipo_grupo', 'tipo_obra', 'estado', 'curva_abc', 'status', 'analista', 'lead_time_dias',
+        'tipo_grupo', 'tipo_analista','analista', 'lead_time_dias', 'curva_abc'
     ]]
 
     print(f"  dim_lead_times: {dim_lead_times.shape}")
-    salvar_tabela(dim_lead_times, 'dim_lead_times_para_preencher', output_dir)
 
     # ── 7. Demais dimensões ───────────────────────────────────────────────────
     print("\n── 7. Demais dimensões ─────────────────────────────────────────────")
@@ -216,7 +235,6 @@ def executar(input_dir: Path = INPUT_DIR,
     # ── 8. Surrogate keys no fato ─────────────────────────────────────────────
     print("\n── 8. Surrogate keys ───────────────────────────────────────────────")
 
-    _lt_key = dim_lead_times[['id_lead_time', 'id_grupo', 'tipo_obra', 'estado']].copy()
 
     df_painel = (
         df_painel
@@ -230,18 +248,15 @@ def executar(input_dir: Path = INPUT_DIR,
                on='comprador', how='left')
         .merge(dim_solicitante[['solicitante', 'id_solicitante']],
                on='solicitante', how='left')
-        .merge(_lt_key, on=['id_grupo', 'tipo_obra', 'estado'], how='left')
     )
 
-    _matched = df_painel['id_lead_time'].notna().sum()
-    print(f"  id_lead_time preenchidos: {_matched:,} de {len(df_painel):,} ({_matched / len(df_painel):.1%})")
 
     # ── 9. Fato principal ─────────────────────────────────────────────────────
     print("\n── 9. fato_solicitacao_item ────────────────────────────────────────")
 
     fato_solicitacao_item = df_painel[[
         'id_item', 'no_da_solicitacao', 'nn_do_pedido', 'nn_da_nota_fiscal',
-        'id_obra', 'id_insumo', 'id_grupo', 'id_lead_time',
+        'id_obra', 'id_insumo', 'id_grupo',
         'id_fornecedor', 'id_comprador', 'id_solicitante',
         'situacao_da_solicitacao', 'situacao_autorizacao_do_item',
         'situacao_do_pedido', 'situacao_autorizacao_do_pedido', 'situacao_pagamento',
@@ -278,7 +293,6 @@ def executar(input_dir: Path = INPUT_DIR,
     checar_integridade(fato_solicitacao_item, 'id_comprador', dim_comprador, 'id_comprador', 'fato → dim_comprador')
     checar_integridade(fato_solicitacao_item, 'id_solicitante', dim_solicitante, 'id_solicitante',
                        'fato → dim_solicitante')
-    checar_integridade(fato_solicitacao_item, 'id_lead_time', dim_lead_times, 'id_lead_time', 'fato → dim_lead_times')
     checar_integridade(dim_insumo, 'id_grupo', dim_grupo_insumo, 'id_grupo', 'dim_insumo → dim_grupo_insumo')
     checar_integridade(dim_lead_times, 'id_grupo', dim_grupo_insumo, 'id_grupo', 'dim_lead_times → dim_grupo_insumo')
 
