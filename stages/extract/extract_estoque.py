@@ -124,7 +124,7 @@ def extrair_estoque(
 
             input_obra.send_keys(pesquisar)
 
-            sleep(1)
+            sleep(1.5)
 
             input_obra.send_keys(Keys.CONTROL, "a")
             input_obra.send_keys(Keys.DELETE)
@@ -137,11 +137,13 @@ def extrair_estoque(
                 )
             )
 
-            sleep(1)
+            sleep(1.5)
+
+        req.scrollar_pagina(driver)
 
         # ── 4. Selecionar todas as colunas  ─────────────────────────────
         logger.info("Selecionando todas as colunas do relatório de estoque")
-        req.selecionar_todas_colunas(wdw)
+        req.selecionar_todas_colunas(wdw, pagina='pagina')
 
         # ── 5. Consultar ──────────────────────────────────────────────────────
         logger.info("Consultando estoque...")
@@ -169,6 +171,7 @@ def extrair_estoque(
             "Todas as linhas",
         )
         req.aguardar_carregamento_tabela(driver)
+        sleep(3)
 
         # ── 7. Exporta CSV ────────────────────────────────────────────────────
         logger.info("Exportando CSV do estoque...")
@@ -178,7 +181,7 @@ def extrair_estoque(
         arquivo_baixado = req.aguardar_download(extensao=".csv")
 
         # ── 9. Move para pasta de destino ─────────────────────────────────────
-        nome_final = f"estoque_{date.today():%Y%m%d}.csv"
+        nome_final = f"estoque_{date.today().year}.csv"
         arquivo_final = destino / nome_final
         shutil.move(str(arquivo_baixado), str(arquivo_final))
         logger.info("Arquivo salvo em: %s", arquivo_final)

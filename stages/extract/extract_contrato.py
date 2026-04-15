@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 # URL do painel de compras
 URL_PAINEL = (
     f"{BASE_URL}/8/index.html"
-    "#/suprimentos/compras/painel-de-compras"
+    "#/suprimentos/contratos-e-medicoes/contratos/cadastros"
 )
 
 
@@ -55,12 +55,12 @@ def extrair_painel_compras(
     """
 
     if data_inicio is None:
-        data_inicio = f"01/01/{date.today().year}"
+        data_inicio = f"01/01/2024"
 
     req = SeleniumRequester()
     req.ensure_login()
 
-    destino = destino or (req.download_dir / "painel_compras")
+    destino = destino or (req.download_dir / "contratos")
     destino.mkdir(parents=True, exist_ok=True)
 
     driver = req.get_driver()
@@ -71,7 +71,7 @@ def extrair_painel_compras(
         req.navegacao_inicial(driver, wdw)
 
         # ── 2. Navega para o painel ───────────────────────────────────────────
-        logger.info("Navegando para o painel de compras...")
+        logger.info("Navegando para os contratos...")
         driver.get(URL_PAINEL)
         sleep(3)
 
@@ -79,8 +79,8 @@ def extrair_painel_compras(
 
         req.scrollar_pagina(driver)
 
-        logger.info("Selecionando todas as colunas do relatório de compras")
-        req.selecionar_todas_colunas(wdw)
+        logger.info("Selecionando todas as colunas do relatório de contratos")
+        req.selecionar_todas_colunas(wdw, pagina='contratos')
 
         sleep(1)
 
@@ -88,7 +88,7 @@ def extrair_painel_compras(
         logger.info("Preenchendo data inicial: %s", data_inicio)
         req.preencher_campo(
             wdw,
-            (By.CSS_SELECTOR, 'input[name="dataInicial"]'),
+            (By.CSS_SELECTOR, 'input[name="dtContratoInicial"]'),
             data_inicio,
         )
         sleep(1)
@@ -116,7 +116,7 @@ def extrair_painel_compras(
 
         req.aguardar_e_clicar(
             wdw,
-            (By.XPATH, '//li[contains(.,"Todas")]'),
+            (By.XPATH, '//li[contains(.,"Todos")]'),
             "Todas as linhas",
         )
 
@@ -130,7 +130,7 @@ def extrair_painel_compras(
         arquivo_baixado = req.aguardar_download(extensao=".csv")
 
         # ── 9. Move para pasta de destino ─────────────────────────────────────
-        nome_final = f"painel_compras_{date.today():%Y%m%d}.csv"
+        nome_final = f"contratos_{date.today().year}.csv"
         arquivo_final = destino / nome_final
         shutil.move(str(arquivo_baixado), str(arquivo_final))
         logger.info("Arquivo salvo em: %s", arquivo_final)

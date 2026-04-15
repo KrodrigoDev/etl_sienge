@@ -156,7 +156,7 @@ def executar(input_dir: Path = INPUT_DIR,
     # ── 5. dim_grupo_insumo ───────────────────────────────────────────────────
     print("\n── 5. dim_grupo_insumo ─────────────────────────────────────────────")
 
-    dim_grupo_insumo = pd.read_excel('../transform/input/')  # colocar a planilha enviada pelo luis
+    dim_grupo_insumo = pd.read_excel('../transform/input/reference/auxiliar_grupo_insumo_luis.xlsx')  # colocar a planilha enviada pelo luis
 
     dim_grupo_insumo = (
         dim_grupo_insumo

@@ -244,23 +244,40 @@ class SeleniumRequester:
         )
 
     @staticmethod
-    def selecionar_todas_colunas(wdw: WebDriverWait) -> None:
+    def selecionar_todas_colunas(wdw: WebDriverWait, pagina: str = 'painel_compras') -> None:
         locator_colunas = (
             By.CSS_SELECTOR,
             'button[aria-label="Exibir seletor de colunas"]',
         )
+
         locator_mostrar_todas = (
-            By.XPATH,
-            '//button[text()="Mostrar todas"]',
+            By.XPATH, '//span[normalize-space()="Mostrar/Ocultar Todas"]'
+
         )
+
+        locator_redefinir = (
+            By.XPATH,
+            '//button[normalize-space()="Redefinir"]'
+        )
+
 
         # 1. Abre o menu
         SeleniumRequester.aguardar_e_clicar(wdw, locator_colunas)
         sleep(1)
 
-        # 2. Clica em Mostrar todas
-        SeleniumRequester.aguardar_e_clicar(wdw, locator_mostrar_todas)
-        sleep(1)
+        # 2. Verifica se já está tudo selecionado
+        botao_redefinir = wdw.until(
+            lambda d: d.find_element(*locator_redefinir)
+        )
+
+        if botao_redefinir.get_attribute("disabled") and not pagina in ['painel_compras', 'contratos']:
+            logger.info("Todas as colunas já estão selecionadas. Nada a fazer.")
+
+        else:
+            logger.info("Selecionando todas as colunas...")
+
+            SeleniumRequester.aguardar_e_clicar(wdw, locator_mostrar_todas)
+            sleep(1)
 
         # 3. Fecha o menu clicando de novo no botão de colunas
         SeleniumRequester.aguardar_e_clicar(wdw, locator_colunas)
@@ -269,7 +286,7 @@ class SeleniumRequester:
     @staticmethod
     def aguardar_carregamento_tabela(
             driver: webdriver.Edge,
-            timeout: int = 120,
+            timeout: int = 150,
     ) -> None:
         """
         Aguarda o spinner de carregamento da MUI DataGrid desaparecer,
@@ -296,7 +313,7 @@ class SeleniumRequester:
         # Após clicar em "Todas", o SIENGE demora alguns segundos para
         # iniciar o carregamento e exibir o spinner.
         try:
-            WebDriverWait(driver, 10).until(
+            WebDriverWait(driver, 12).until(
                 EC.visibility_of_element_located(locator_spinner)
             )
             logger.info("Spinner detectado — carregamento em andamento...")
@@ -318,6 +335,6 @@ class SeleniumRequester:
         container = driver.find_element(By.ID, "main")
 
         driver.execute_script(
-            "arguments[0].scrollBy(0, 300)",
+            "arguments[0].scrollBy(0, 350)",
             container
         )

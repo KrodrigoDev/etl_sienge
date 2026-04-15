@@ -121,6 +121,7 @@ def extrair_painel_compras(
         )
 
         req.aguardar_carregamento_tabela(driver)
+        sleep(3)
 
         # ── 7. Exporta CSV ────────────────────────────────────────────────────
         logger.info("Exportando CSV...")
@@ -130,7 +131,7 @@ def extrair_painel_compras(
         arquivo_baixado = req.aguardar_download(extensao=".csv")
 
         # ── 9. Move para pasta de destino ─────────────────────────────────────
-        nome_final = f"painel_compras_{date.today():%Y%m%d}.csv"
+        nome_final = f"painel_compras_{date.today().year}.csv"
         arquivo_final = destino / nome_final
         shutil.move(str(arquivo_baixado), str(arquivo_final))
         logger.info("Arquivo salvo em: %s", arquivo_final)
