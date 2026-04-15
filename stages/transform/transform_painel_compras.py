@@ -16,7 +16,6 @@ Relacionamentos gerados (todos 1:N, single direction)
   dim_comprador[id_comprador]   → fato_solicitacao_item[id_comprador]
   dim_solicitante[id_sol.]      → fato_solicitacao_item[id_solicitante]
   dim_grupo_insumo[id_grupo]    → fato_solicitacao_item[id_grupo]
-  dim_grupo_insumo[id_grupo]    → dim_insumo[id_grupo]
   dim_lead_times[id_grupo]  → dim_grupo_insumo[id_grupo]
 """
 
@@ -25,6 +24,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
+import numpy as np
 
 from utils.normalizer import (
     checar_integridade,
@@ -151,25 +151,15 @@ def executar(input_dir: Path = INPUT_DIR,
         left_on='id_grupo_auxiliar', right_on='ref_grupo', how='left'
     ).drop(columns=['ref_grupo', 'id_grupo_auxiliar'], errors='ignore')
 
-    colunas_originais_insumo = dim_insumo.columns.to_list()
-
-    df_auxiliar_lead_time = pd.read_excel('../transform/input/reference/Lead Time - Grupos.xlsx', sheet_name='Lead Time', skiprows=6)
-    df_auxiliar_lead_time = df_auxiliar_lead_time.drop(columns=['Unnamed: 0'])
-    df_auxiliar_lead_time.dropna(subset='Cód. Família', inplace=True)
-
-    df_auxiliar_lead_time['id_grupo'] = df_auxiliar_lead_time['Cód. Família'].apply(cod_grupo_to_id)
-
-    dim_insumo = pd.merge(dim_insumo, df_auxiliar_lead_time, how='left', on='id_grupo' )
-
-
     print(f"  dim_insumo: {dim_insumo.shape}")
 
     # ── 5. dim_grupo_insumo ───────────────────────────────────────────────────
     print("\n── 5. dim_grupo_insumo ─────────────────────────────────────────────")
 
+    dim_grupo_insumo = pd.read_excel('../transform/input/')  # colocar a planilha enviada pelo luis
+
     dim_grupo_insumo = (
-        dim_insumo[['id_grupo', 'cod_grupo_de_insumo', 'grupo_de_insumo', 'tipo_grupo',
-                    'Analista obras privadas', 'Analista Públicas','Analista Filial Sul','Lead Time', 'Curva ABC']]
+        dim_grupo_insumo
         .drop_duplicates(subset='id_grupo')
         .dropna(subset=['id_grupo'])
         .sort_values('id_grupo')
@@ -177,25 +167,18 @@ def executar(input_dir: Path = INPUT_DIR,
         .copy()
     )
 
-
-    dim_insumo = dim_insumo[colunas_originais_insumo] # após trazer o que importa pra grupo insumos, voltamos ao original em insumo
-    dim_insumo.drop_duplicates(subset='id_insumo', inplace=True)
     print(f"  dim_grupo_insumo: {dim_grupo_insumo.shape}")
 
-    # ── 6. dim_lead_times ─────────────────────────────────────────────────────
+    # ── 6. dim_lead_times (virou uma dim analista) ─────────────────────────────────────────────────────
     print("\n── 6. dim_lead_times ───────────────────────────────────────────────")
 
-    dim_lead_times = dim_grupo_insumo[['id_grupo', 'cod_grupo_de_insumo', 'grupo_de_insumo', 'tipo_grupo',
-                    'Analista obras privadas', 'Analista Públicas','Analista Filial Sul','Lead Time', 'Curva ABC']]
+    dim_lead_times = dim_grupo_insumo[['id_grupo', 'cod_grupo_de_insumo',
+                                       'Analista obras privadas', 'Analista Públicas', 'Analista Filial Sul']]
 
     dim_lead_times = dim_lead_times.melt(
         id_vars=[
             'id_grupo',
-            'cod_grupo_de_insumo',
-            'grupo_de_insumo',
-            'tipo_grupo',
-            'Lead Time',
-            'Curva ABC'
+            'cod_grupo_de_insumo'
         ],
         value_vars=[
             'Analista obras privadas',
@@ -208,15 +191,9 @@ def executar(input_dir: Path = INPUT_DIR,
 
     dim_lead_times.insert(0, 'id_lead_time', range(1, len(dim_lead_times) + 1))
 
-    dim_lead_times.rename(
-        columns={
-        'Lead Time':'lead_time_dias', 'Curva ABC': 'curva_abc'
-        },
-        inplace=True
-    )
     dim_lead_times = dim_lead_times[[
-        'id_lead_time', 'id_grupo', 'cod_grupo_de_insumo', 'grupo_de_insumo',
-        'tipo_grupo', 'tipo_analista','analista', 'lead_time_dias', 'curva_abc'
+        'id_lead_time', 'id_grupo', 'cod_grupo_de_insumo',
+        'tipo_analista', 'analista'
     ]]
 
     print(f"  dim_lead_times: {dim_lead_times.shape}")
@@ -235,6 +212,9 @@ def executar(input_dir: Path = INPUT_DIR,
     # ── 8. Surrogate keys no fato ─────────────────────────────────────────────
     print("\n── 8. Surrogate keys ───────────────────────────────────────────────")
 
+    _grp_lt = dim_grupo_insumo[['id_grupo', 'Lead Time', 'Curva ABC']].rename(
+        columns={'Lead Time': 'lead_time_dias', 'Curva ABC': 'curva_abc'}
+    )
 
     df_painel = (
         df_painel
@@ -248,8 +228,8 @@ def executar(input_dir: Path = INPUT_DIR,
                on='comprador', how='left')
         .merge(dim_solicitante[['solicitante', 'id_solicitante']],
                on='solicitante', how='left')
+        .merge(_grp_lt, on='id_grupo', how='left')
     )
-
 
     # ── 9. Fato principal ─────────────────────────────────────────────────────
     print("\n── 9. fato_solicitacao_item ────────────────────────────────────────")
@@ -263,7 +243,8 @@ def executar(input_dir: Path = INPUT_DIR,
         'quantidade_solicitada', 'quantidade_entregue', 'saldo', 'valor_da_nota',
         'data_da_solicitacao', 'data_autorizacao_da_solicitacao',
         'data_para_chegada_a_obra', 'data_do_pedido', 'previsao_de_entrega',
-        'data_autorizacao_do_pedido', 'data_da_nota_fiscal', 'data_entrega_na_obra',
+        'data_autorizacao_do_pedido', 'data_da_nota_fiscal', 'data_entrega_na_obra', 'lead_time_dias',
+        'curva_abc'
     ]].copy()
 
     fato_solicitacao_item['valor_da_nota'] = converter_valor_br(
@@ -277,6 +258,15 @@ def executar(input_dir: Path = INPUT_DIR,
             fato_solicitacao_item['data_entrega_na_obra'] -
             fato_solicitacao_item['previsao_de_entrega']
     ).dt.days
+
+    fato_solicitacao_item['sla_atendido'] = np.where(
+        fato_solicitacao_item['nn_do_pedido'].notna()
+        & fato_solicitacao_item['dias_solicitacao_ate_pedido'].notna()
+        & fato_solicitacao_item['lead_time_dias'].notna(),
+        fato_solicitacao_item['dias_solicitacao_ate_pedido']
+        <= fato_solicitacao_item['lead_time_dias'],
+        None  # sem pedido ou sem lead_time: indeterminado
+    )
 
     _val_max = fato_solicitacao_item['valor_da_nota'].max()
     print(f"  fato_solicitacao_item: {fato_solicitacao_item.shape}")
@@ -293,7 +283,8 @@ def executar(input_dir: Path = INPUT_DIR,
     checar_integridade(fato_solicitacao_item, 'id_comprador', dim_comprador, 'id_comprador', 'fato → dim_comprador')
     checar_integridade(fato_solicitacao_item, 'id_solicitante', dim_solicitante, 'id_solicitante',
                        'fato → dim_solicitante')
-    checar_integridade(dim_insumo, 'id_grupo', dim_grupo_insumo, 'id_grupo', 'dim_insumo → dim_grupo_insumo')
+    checar_integridade(fato_solicitacao_item, 'id_grupo', dim_grupo_insumo, 'id_grupo',
+                       'fato_solicitacao_item → dim_grupo_insumo')
     checar_integridade(dim_lead_times, 'id_grupo', dim_grupo_insumo, 'id_grupo', 'dim_lead_times → dim_grupo_insumo')
 
     # ── 11. Exportação ────────────────────────────────────────────────────────

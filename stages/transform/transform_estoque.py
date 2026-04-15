@@ -20,7 +20,9 @@ Relacionamentos gerados (todos 1:N, single direction)
   dim_obra[id_obra]          → fato_estoque[id_obra]
   dim_insumo[id_insumo]      → fato_estoque[id_insumo]
   dim_grupo_insumo[id_grupo] → fato_estoque[id_grupo]
+
   dim_insumo[id_insumo]      → fato_solicitacao_item[id_insumo]  ← compartilhada
+  dim_grupo_insumo[id_grupo] → fato_solicitacao_item[id_grupo]    ← compartilhada
   dim_obra[id_obra]          → fato_solicitacao_item[id_obra]     ← compartilhada
 """
 
