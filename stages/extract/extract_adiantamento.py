@@ -1,0 +1,1 @@
+# Os dados daqui só podem ser extraidos quando o extract serviço for realizado, porque dependem totalmente da dim_empresa

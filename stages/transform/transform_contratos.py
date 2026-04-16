@@ -20,6 +20,7 @@ Relacionamentos gerados (todos 1:N, single direction)
   dim_contrato[id_contrato]     → fato_contrato[id_contrato]
   dim_obra[id_obra]             → fato_contrato[id_obra]
   dim_fornecedor[id_fornecedor] → fato_contrato[id_fornecedor]
+  dim_empresa[id_empresa] → fato_contrato[id_empresa]
 """
 
 from __future__ import annotations
@@ -148,18 +149,33 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
 
     print(f"  dim_contrato: {dim_contrato.shape}")
 
+    # ── 5.1. dim_empresa ───────────────────────────────────────────────────────
+    dim_empresa = (
+        df[['cod_empresa', 'empresa']]
+        .drop_duplicates(subset='cod_empresa')
+        .dropna(subset=['cod_empresa'])
+        .sort_values('empresa')
+        .reset_index(drop=True)
+        .copy()
+    )
+    dim_empresa.insert(0, 'id_empresa', dim_empresa.index + 1)
+    print(f"  dim_empresa: {dim_empresa.shape}")
+
+
     # ── 6. Surrogate keys no fato ─────────────────────────────────────────────
     print("\n── 6. Surrogate keys ───────────────────────────────────────────────")
 
     _contrato_map = dim_contrato.set_index('contrato')['id_contrato'].to_dict()
     _obra_map = dim_obra.set_index('cod_obra')['id_obra'].to_dict()
     _fornecedor_map = dim_fornecedor.set_index('cod_fornecedor')['id_fornecedor'].to_dict()
+    _emp_map = dim_empresa.set_index('cod_empresa')['id_empresa'].to_dict()
 
     df['id_contrato'] = df['contrato'].map(_contrato_map)
     df['id_obra'] = df['cod_obra'].map(_obra_map)
     df['id_fornecedor'] = df['cod_fornecedor'].map(_fornecedor_map)
+    df['id_empresa'] = df['cod_empresa'].map(_emp_map)
 
-    for fk, nome in [('id_contrato', 'contrato'), ('id_obra', 'obra'), ('id_fornecedor', 'fornecedor')]:
+    for fk, nome in [('id_contrato', 'contrato'), ('id_obra', 'obra'), ('id_fornecedor', 'fornecedor'), ('id_empresa', 'empresa')]:
         matched = df[fk].notna().sum()
         print(f"  {fk}: {matched:,} de {len(df):,} ({matched / len(df):.1%})")
 
@@ -170,6 +186,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         'id_contrato',
         'id_obra',
         'id_fornecedor',
+        'id_empresa',
 
         # status
         'situacao_do_contrato',
@@ -206,19 +223,24 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     checar_integridade(fato_contrato, 'id_obra', dim_obra, 'id_obra', 'fato_contrato → dim_obra')
     checar_integridade(fato_contrato, 'id_fornecedor', dim_fornecedor, 'id_fornecedor',
                        'fato_contrato → dim_fornecedor')
+    checar_integridade(fato_contrato, 'id_empresa', dim_empresa, 'id_empresa',
+                       'fato_contrato → dim_empresa')
 
     # ── 9. Exportação ─────────────────────────────────────────────────────────
     print("\n── 9. Exportação ───────────────────────────────────────────────────")
 
     salvar_tabela(dim_fornecedor, 'dim_fornecedor', output_dir)  # expandida
     salvar_tabela(dim_contrato, 'dim_contrato', output_dir)
+    salvar_tabela(dim_empresa, 'dim_empresa', output_dir)  # nova
     salvar_tabela(fato_contrato, 'fato_contrato', output_dir)
+
 
     print("\n── Resumo ──────────────────────────────────────────────────────────")
     for nome, tabela in {
         'dim_fornecedor (expandida)': dim_fornecedor,
         'dim_contrato': dim_contrato,
         'fato_contrato': fato_contrato,
+        'dim_empresa (nova)': dim_empresa,
     }.items():
         print(f"  {nome:<30} {str(tabela.shape):>12}")
 
@@ -227,6 +249,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
   dim_contrato[id_contrato]     → fato_contrato[id_contrato]
   dim_obra[id_obra]             → fato_contrato[id_obra]
   dim_fornecedor[id_fornecedor] → fato_contrato[id_fornecedor]
+  dim_empresa[id_empresa] → fato_contrato[id_empresa]
 
 ── dim_fornecedor compartilhada ─────────────────────────────────────────────
   dim_fornecedor[id_fornecedor] → fato_solicitacao_item[id_fornecedor]

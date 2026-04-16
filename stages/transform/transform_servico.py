@@ -37,7 +37,6 @@ import pandas as pd
 
 from utils.normalizer import (
     checar_integridade,
-    criar_dimensao,
     expandir_dimensao,
     ler_dados,
     normalizar_colunas,
@@ -104,9 +103,11 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
 
     dim_obra = pd.read_csv(output_dir / 'dim_obra.csv', sep=';')
     dim_solicitante = pd.read_csv(output_dir / 'dim_solicitante.csv', sep=';')
+    dim_empresa = pd.read_csv(output_dir / 'dim_empresa.csv', sep=';')
 
     print(f"  dim_obra:        {dim_obra.shape}")
     print(f"  dim_solicitante: {dim_solicitante.shape}")
+    print(f"  dim_empresa: {dim_empresa.shape}")
 
     # ── 4. Expandir dim_obra com obras novas ──────────────────────────────────
     print("\n── 4. Expandindo dimensões existentes ──────────────────────────────")
@@ -124,6 +125,19 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         nome_id='id_obra',
         col_pk_natural='cod_obra',
     )
+
+    # ── 5.  Expandir dim_empresa com empresas novas ─────────────────────────────────────────────
+
+    dim_empresa_novo = df[['cod_empresa', 'empresa']].copy()
+
+    dim_empresa = expandir_dimensao(
+        dim_existente=dim_empresa,
+        df_novo=dim_empresa_novo,
+        colunas_naturais=['cod_empresa', 'empresa'],
+        nome_id='cod_empresa',
+        col_pk_natural='cod_empresa',
+    )
+
 
     # ── 5. Expandir dim_solicitante com solicitantes novos ────────────────────
     # A dim_solicitante usa 'nome_solicitante' como chave natural
@@ -176,17 +190,20 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     _sol_map = dim_solicitante.set_index('solicitante')['id_solicitante'].to_dict()
     _dep_map = dim_departamento.set_index('cod_departamento')['id_departamento'].to_dict()
     _aut_map = dim_autorizador.set_index('cod_autorizador')['id_autorizador'].to_dict()
+    _emp_map = dim_empresa.set_index('cod_empresa')['id_empresa'].to_dict()
 
     df['id_obra'] = df['cod_obra'].map(_obra_map)
     df['id_solicitante'] = df['nome_solicitante'].map(_sol_map)
     df['id_departamento'] = df['cod_departamento'].map(_dep_map)
     df['id_autorizador'] = df['cod_autorizador'].map(_aut_map)
+    df['id_empresa'] = df['cod_empresa'].map(_emp_map)
 
     for fk, total in [
         ('id_obra', len(df)),
         ('id_solicitante', len(df)),
         ('id_departamento', len(df)),
         ('id_autorizador', len(df)),
+        ('id_empresa', len(df)),
     ]:
         matched = df[fk].notna().sum()
         print(f"  {fk:<20}: {matched:,} de {total:,} ({matched / total:.1%})")
@@ -203,6 +220,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         'id_solicitante',
         'id_departamento',
         'id_autorizador',
+        'id_empresa',
 
         # status
         'situacao',
@@ -239,6 +257,8 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
                        'fato_servico → dim_departamento')
     checar_integridade(fato_servico, 'id_autorizador', dim_autorizador, 'id_autorizador',
                        'fato_servico → dim_autorizador')
+    checar_integridade(fato_servico, 'id_empresa', dim_empresa, 'id_empresa',
+                       'fato_servico → dim_empresa')
 
     # ── 11. Exportação ────────────────────────────────────────────────────────
     print("\n── 11. Exportação ──────────────────────────────────────────────────")
@@ -247,6 +267,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     salvar_tabela(dim_solicitante, 'dim_solicitante', output_dir)  # expandida
     salvar_tabela(dim_departamento, 'dim_departamento', output_dir)  # nova
     salvar_tabela(dim_autorizador, 'dim_autorizador', output_dir)  # nova
+    salvar_tabela(dim_empresa, 'dim_empresa', output_dir)  # nova
     salvar_tabela(fato_servico, 'fato_servico', output_dir)
 
     print("\n── Resumo ──────────────────────────────────────────────────────────")
@@ -255,6 +276,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         'dim_solicitante (expandida)': dim_solicitante,
         'dim_departamento (nova)': dim_departamento,
         'dim_autorizador (nova)': dim_autorizador,
+        'dim_empresa (nova)': dim_empresa,
         'fato_servico': fato_servico,
     }.items():
         print(f"  {nome:<35} {str(tabela.shape):>12}")

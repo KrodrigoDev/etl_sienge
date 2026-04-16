@@ -18,11 +18,15 @@ import pandas as pd
 # I/O
 # ─────────────────────────────────────────────────────────────────────────────
 
-def ler_dados(arquivos) -> pd.DataFrame:
+def ler_dados(arquivos, formato:str='csv', salto:int=0) -> pd.DataFrame:
     """Lê e concatena todos os CSVs de um glob em um único DataFrame."""
     dfs = []
     for arq in arquivos:
-        df = pd.read_csv(arq, sep=';', low_memory=False)
+        if formato == 'csv':
+            df = pd.read_csv(arq, sep=';', low_memory=False)
+        elif formato == 'excel':
+            df = pd.read_excel(arq, skiprows=salto, decimal=',')
+            df.loc[:, 'nome_arquivo'] = arq.name
         print(f"  Lido: {arq.name} → {df.shape}")
         dfs.append(df)
     if not dfs:

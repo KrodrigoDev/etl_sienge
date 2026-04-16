@@ -270,7 +270,7 @@ class SeleniumRequester:
             lambda d: d.find_element(*locator_redefinir)
         )
 
-        if botao_redefinir.get_attribute("disabled") and not pagina in ['painel_compras', 'contratos']:
+        if botao_redefinir.get_attribute("disabled") and not pagina in ['painel_compras', 'contratos', 'serviços']:
             logger.info("Todas as colunas já estão selecionadas. Nada a fazer.")
 
         else:

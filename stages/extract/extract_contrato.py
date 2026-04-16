@@ -34,7 +34,7 @@ URL_PAINEL = (
 )
 
 
-def extrair_painel_compras(
+def extrair_contratos(
         data_inicio: str | None = None,
         destino: Path | None = None,
 ) -> Path:
@@ -147,5 +147,5 @@ if __name__ == "__main__":
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
-    caminho = extrair_painel_compras()
+    caminho = extrair_contratos()
     print(f"Extração concluída: {caminho}")
