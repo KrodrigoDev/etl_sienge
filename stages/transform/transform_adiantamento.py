@@ -184,9 +184,6 @@ def _transformar(df: pd.DataFrame) -> pd.DataFrame:
     for col_dt in ('data', 'vencto'):
         df[col_dt] = pd.to_datetime(df[col_dt], format='%d/%m/%Y', errors='coerce')
 
-    # Valores numéricos (já vêm como string; usar converter_valor_br)
-    df['vl_movimento'] = converter_valor_br(df['vl_movimento'])
-    df['saldo'] = converter_valor_br(df['saldo'])
 
     # IDs inteiros
     df['empresa_cod'] = pd.to_numeric(df['empresa_cod'], errors='coerce').astype('Int64')
@@ -195,6 +192,8 @@ def _transformar(df: pd.DataFrame) -> pd.DataFrame:
     # Limpeza de texto
     df['observacao'] = df['observacao'].str.replace(r'\s+', ' ', regex=True).str.strip()
 
+    df['tipo_vinculo'] =  df['documento_vinculado'].apply(lambda x: 'Contrato' if str(x).startswith('CTS') else 'Pedido de Compra')
+    
     return df
 
 

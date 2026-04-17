@@ -23,6 +23,7 @@ from selenium.webdriver.edge.options import Options
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.wait import WebDriverWait
+from selenium.common.exceptions import TimeoutException
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,17 @@ class SeleniumRequester:
             ),
             "Selecionar perfil",
         )
+
+        try:
+            # caso exista um aviso informado que já está conectado ir para aba
+            aviso = SeleniumRequester.aguardar_presenca(wdw, (By.CSS_SELECTOR, '.spwAlertaAviso'))
+
+            if aviso:
+               driver.get(f"{BASE_URL}/removerUsuarioLogadoServlet?acao=S")
+
+        except TimeoutException:
+            logger.debug("Alerta não apareceu — fluxo normal.")
+
         sleep(2)
 
     @staticmethod
@@ -183,11 +195,19 @@ class SeleniumRequester:
                 arquivo = max(arquivos, key=lambda f: f.stat().st_mtime)
                 logger.info("Download concluído: %s", arquivo.name)
                 return arquivo
-            sleep(2)
+            sleep(0.5)
 
         raise TimeoutError(
             f"Download não concluído em {timeout}s — "
             f"verifique a pasta {self.download_dir}"
+        )
+
+    @staticmethod
+    def entrar_iframe(wdw: WebDriverWait, nome_iframe: str):
+        wdw.until(
+            EC.frame_to_be_available_and_switch_to_it(
+                (By.NAME, nome_iframe)
+            )
         )
 
     @staticmethod
