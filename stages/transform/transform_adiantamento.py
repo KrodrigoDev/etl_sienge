@@ -162,9 +162,9 @@ def _parse_df_bruto(df: pd.DataFrame) -> pd.DataFrame:
                 'data': c0,
                 'vencto': cv(row, 2),
                 'documento': cv(row, 3),
-                'tipo_do_mov': cv(row, 6),
-                'vl_movimento': cv(row, 7),
-                'saldo': cv(row, 8),
+                'tipo_do_mov': cv(row, 5),
+                'vl_movimento': cv(row, 6),
+                'saldo': cv(row, 7),
                 'observacao': cv(row, 9),
                 'nome_arquivo': nome_arq,
             })
@@ -234,4 +234,8 @@ def executar(
 
 
 if __name__ == '__main__':
+    import logging
+
+    logging.basicConfig(level=logging.INFO,
+                        format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
     executar()
