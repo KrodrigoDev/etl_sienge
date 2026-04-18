@@ -33,7 +33,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from utils.normalizer import (
+from stages.transform.utils.normalizer import (
     checar_integridade,
     cod_grupo_to_id,
     converter_quantidade_br,

@@ -358,3 +358,30 @@ class SeleniumRequester:
             "arguments[0].scrollBy(0, 350)",
             container
         )
+
+    @staticmethod
+    def fechar_popup_novidade(wdw: WebDriverWait) -> None:
+        """
+        Fecha o popup de "novidade" do SIENGE caso ele apareça após a navegação.
+
+        O SIENGE exibe ocasionalmente um MuiDialog com vídeo do YouTube e um
+        botão "Fechar" antes de liberar a tela principal. Sem tratamento, esse
+        dialog intercepta qualquer clique subsequente (ElementClickInterceptedException).
+
+        Estratégia: tenta localizar o botão "Fechar" dentro do dialog com um
+        timeout curto — se não aparecer, assume que o popup não existe e segue.
+        """
+        locator_fechar = (
+            By.XPATH,
+            '//div[@role="dialog"]//button[normalize-space()="Fechar"]',
+        )
+
+        try:
+            SeleniumRequester.aguardar_e_clicar(
+                WebDriverWait(wdw._driver, 5),
+                locator_fechar,
+                "Popup novidade SIENGE",
+            )
+            logger.info("Popup de novidade fechado.")
+        except TimeoutException:
+            logger.debug("Nenhum popup de novidade detectado — seguindo.")

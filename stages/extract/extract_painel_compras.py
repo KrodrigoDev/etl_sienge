@@ -73,7 +73,10 @@ def extrair_painel_compras(
         # ── 2. Navega para o painel ───────────────────────────────────────────
         logger.info("Navegando para o painel de compras...")
         driver.get(URL_PAINEL)
-        sleep(3)
+
+        sleep(2)
+
+        req.fechar_popup_novidade(wdw)
 
         # ── 3 Selecionar todas as colunas ───────────────────────────────────
 

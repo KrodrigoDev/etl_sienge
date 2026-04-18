@@ -73,7 +73,10 @@ def extrair_servicos(
         # ── 2. Navega para o painel ───────────────────────────────────────────
         logger.info("Navegando para os serviços...")
         driver.get(URL_PAINEL)
+
         sleep(2)
+
+        req.fechar_popup_novidade(wdw)
 
         # ── 3 Selecionar todas as colunas ───────────────────────────────────
 
@@ -130,7 +133,7 @@ def extrair_servicos(
         arquivo_baixado = req.aguardar_download(extensao=".csv")
 
         # ── 9. Move para pasta de destino ─────────────────────────────────────
-        nome_final = f"contratos_{date.today().year}.csv"
+        nome_final = f"servicos_{date.today().year}.csv"
         arquivo_final = destino / nome_final
         shutil.move(str(arquivo_baixado), str(arquivo_final))
         logger.info("Arquivo salvo em: %s", arquivo_final)

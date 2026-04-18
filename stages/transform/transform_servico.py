@@ -35,7 +35,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from utils.normalizer import (
+from stages.transform.utils.normalizer import (
     checar_integridade,
     expandir_dimensao,
     ler_dados,

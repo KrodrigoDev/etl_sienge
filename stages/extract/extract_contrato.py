@@ -60,7 +60,7 @@ def extrair_contratos(
     req = SeleniumRequester()
     req.ensure_login()
 
-    destino = destino or (req.download_dir / "contratos")
+    destino = destino or (req.download_dir / "contrato")
     destino.mkdir(parents=True, exist_ok=True)
 
     driver = req.get_driver()
@@ -73,7 +73,10 @@ def extrair_contratos(
         # ── 2. Navega para o painel ───────────────────────────────────────────
         logger.info("Navegando para os contratos...")
         driver.get(URL_PAINEL)
-        sleep(3)
+
+        sleep(2)
+
+        req.fechar_popup_novidade(wdw)
 
         # ── 3 Selecionar todas as colunas ───────────────────────────────────
 

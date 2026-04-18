@@ -15,8 +15,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from utils.normalizer import (
-    converter_valor_br,
+from stages.transform.utils.normalizer import (
     ler_dados,
     normalizar_colunas,
     salvar_tabela,

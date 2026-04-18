@@ -30,7 +30,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from utils.normalizer import (
+from stages.transform.utils.normalizer import (
     checar_integridade,
     converter_valor_br,
     expandir_dimensao,
@@ -54,7 +54,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     # ── 1. Leitura ────────────────────────────────────────────────────────────
     print("\n── 1. Leitura (contratos) ──────────────────────────────────────────")
 
-    df = ler_dados((input_dir / 'contratos').glob('*.csv'))
+    df = ler_dados((input_dir / 'contrato').glob('*.csv'))
     df = normalizar_colunas(df)
 
     # Remove linha de totais
