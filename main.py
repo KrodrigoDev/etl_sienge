@@ -55,8 +55,7 @@ logger = logging.getLogger(__name__)
 
 # ── Caminhos ──────────────────────────────────────────────────────────────────
 ROOT = Path(__file__).resolve().parent
-print(ROOT)
-print("aquii")
+
 INPUT_DIR = ROOT / "stages" / "transform" / "input"
 REFERENCE_DIR = ROOT / "stages" / "transform" / "input" / "reference"
 OUTPUT_DIR = ROOT / "stages" / "transform" / "output"

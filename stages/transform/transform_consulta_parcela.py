@@ -250,6 +250,31 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     # Obra/CC/Dpto chegam 100% NULL nesta consulta — flag de qualidade para o futuro
     df["flag_sem_obra"]        = df.get("cod_obra", pd.Series(np.nan, index=df.index)).isna()
     df["flag_autorizada"]      = df.get("parcela_autorizada", "").str.strip().str.lower() == "sim"
+
+
+    # Identifica vencimentos em fim de semana (sáb=5, dom=6)
+    df["flag_venc_fds"] = df["data_vencimento"].dt.dayofweek.isin([5, 6])
+
+    # Próximo dia útil de um vencimento em FDS
+    # Sábado (+2) → Segunda | Domingo (+1) → Segunda
+    df["proximo_util_apos_fds"] = df["data_vencimento"].where(
+        ~df["flag_venc_fds"]
+    ).fillna(
+        df["data_vencimento"] + pd.to_timedelta(
+            df["data_vencimento"].dt.dayofweek.map({5: 2, 6: 1}).fillna(0).astype(int),
+            unit="D"
+        )
+    )
+
+    # Parcela venceu no FDS E o próximo útil é hoje → tratar como "vence hoje"
+    df["flag_venc_fds_paga_hoje"] = (
+            df["flag_venc_fds"]
+            & (df["proximo_util_apos_fds"] == data_hoje)
+            & df["flag_vencida"]  # ainda não paga
+    )
+
+
+
     df["faixa_atraso"]         = _faixa_atraso(df["dias_de_atraso"]).astype(str)
     df["faixa_saldo"]         = _faixa_saldo(df["saldo_em_aberto"])
 
@@ -517,6 +542,9 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         "flag_sem_credor",
         "flag_sem_obra",
         "flag_autorizada",
+        "flag_venc_fds",
+        "proximo_util_apos_fds",
+        "flag_venc_fds_paga_hoje",
 
         # ── Atributos de workflow / auditoria ─────────────────────
         "ciencia_do_titulo",

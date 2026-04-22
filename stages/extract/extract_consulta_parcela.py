@@ -1,0 +1,220 @@
+"""
+stages/extract/extract_painel_compras.py
+-----------------------------------------
+Extrai o relatório de Painel de Compras do SIENGE e salva como CSV.
+
+Fluxo:
+  1. Login via sessão salva no perfil Edge
+  2. Navega para a URL do painel de compras
+  3. Preenche data inicial
+  4. Consulta
+  5. Seleciona 'Todas' as linhas
+  6. Exporta CSV via modal padrão
+  7. Aguarda download e move para pasta de destino
+"""
+
+from __future__ import annotations
+
+import logging
+import shutil
+from datetime import date
+from pathlib import Path
+from time import sleep
+
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+
+from src.drivers.selenium_requester import BASE_URL, SeleniumRequester
+
+logger = logging.getLogger(__name__)
+
+# URL do painel de compras
+URL_PAINEL = (
+    f"{BASE_URL}/8/index.html"
+    "#/financeiro/contas-pagar/consulta-parcelas"
+)
+
+
+def extrair_consulta_parcela(
+        data_inicio: str | None = None,
+        destino: Path | None = None,
+):
+    if data_inicio is None:
+        data_inicio = f"01/01/2026"
+
+    req = SeleniumRequester()
+    req.ensure_login()
+
+    destino = destino or (req.download_dir / "consulta_parcela")
+    destino.mkdir(parents=True, exist_ok=True)
+
+    driver = req.get_driver()
+    wdw = req.waiter(driver)
+
+    try:
+        # ── 1. Login e Acesso ao perfil ───────────────────────────────────────
+        req.navegacao_inicial(driver, wdw)
+
+        # ── 2. Navega para o painel ───────────────────────────────────────────
+        logger.info("Navegando para os serviços...")
+        driver.get(URL_PAINEL)
+        sleep(2)
+        req.fechar_popup_novidade(wdw)
+
+        # ── 3. Preenche data inicial ──────────────────────────────────────────
+        logger.info("Preenchendo data inicial: %s", data_inicio)
+        req.preencher_campo(
+            wdw,
+            (By.CSS_SELECTOR, 'input[name="dataVencimentoInicial"]'),
+            data_inicio,
+        )
+        sleep(1)
+
+        # ── 5. Consultar ──────────────────────────────────────────────────────
+        logger.info("Consultando...")
+        req.aguardar_e_clicar(
+            wdw,
+            (By.XPATH, '//button[@type="submit" and .//text()[contains(.,"Consultar")]]'),
+            "Consultar",
+        )
+
+        req.aguardar_carregamento_tabela(driver)
+
+        # ── 3. Selecionar todas as colunas ────────────────────────────────────
+        req.scrollar_pagina(driver)
+        logger.info("Selecionando todas as colunas do relatório de serviços")
+        req.selecionar_todas_colunas(wdw, pagina='serviços')
+        sleep(2)
+
+
+        req.aguardar_presenca(
+            wdw,
+            (By.XPATH, '//div[contains(@class,"MuiTablePagination-select")]'),
+        )
+        sleep(10)
+
+        # ── 6. Seleciona '5000' linhas por página ─────────────────────────────
+        logger.info("Selecionando 5000 linhas por página...")
+
+        # Aguarda o select ser clicável e abre o dropdown
+        select_paginacao = wdw.until(
+            EC.element_to_be_clickable(
+                (By.XPATH, '//div[contains(@class,"MuiTablePagination-select")]')
+            )
+        )
+        select_paginacao.click()
+        sleep(1)
+
+        # Aguarda o <li> aparecer no DOM e estar clicável
+        # role="option" evita pegar outros <li> que contenham "5000" em outro contexto
+        opcao_5000 = wdw.until(
+            EC.element_to_be_clickable(
+                (By.XPATH, '//li[@role="option" and contains(text(),"5000")]')
+            )
+        )
+        opcao_5000.click()
+        sleep(2)
+
+        req.aguardar_carregamento_tabela(driver)
+
+        pagina = 1
+        while True:
+
+            # ── 7. Exporta CSV ────────────────────────────────────────────────
+            logger.info("Exportando CSV da página %d...", pagina)
+            _exportar_csv_modal(wdw)
+
+            # ── 8. Aguarda download ───────────────────────────────────────────
+            arquivo_baixado = req.aguardar_download(extensao=".csv")
+
+            # ── 9. Move para pasta de destino ─────────────────────────────────
+            nome_final = f"consulta_parcela_{pagina}_{date.today().year}.csv"
+            arquivo_final = destino / nome_final
+            shutil.move(str(arquivo_baixado), str(arquivo_final))
+            logger.info("Arquivo salvo em: %s", arquivo_final)
+
+            # ── 10. Verifica se existe próxima página ─────────────────────────
+            try:
+                btn_proxima = driver.find_element(
+                    By.XPATH,
+                    '//button[@aria-label="Ir para a próxima página"]',
+                )
+            except Exception:
+                logger.info("Botão de próxima página não encontrado. Encerrando paginação.")
+                break
+
+            if btn_proxima.get_attribute("disabled") is not None:
+                logger.info("Última página atingida após página %d. Encerrando.", pagina)
+                break
+
+            # ── 11. Vai para a próxima página ─────────────────────────────────
+            # Usa JS para evitar ElementClickInterceptedException causado pelo
+            # widget de feedback flutuante (id="feedback-widget-floating-button")
+            # que fica sobreposto ao botão de paginação no canto da tela
+            logger.info("Avançando para a página %d...", pagina + 1)
+            driver.execute_script("arguments[0].click();", btn_proxima)
+            pagina += 1
+            sleep(1.5)
+            req.aguardar_carregamento_tabela(driver)
+
+    finally:
+        print('chegou aqui')
+        breakpoint()
+        driver.quit()
+        logger.info("Driver encerrado.")
+
+
+def _exportar_csv_modal(wdw) -> None:
+    """
+    Sequência do modal de exportação do SIENGE.
+
+    O botão 'Gerar Relatório' tem o texto dentro de um <span> filho com
+    um ícone SVG antes. contains(., ...) no <button> pai pode falhar no
+    Edge porque o contexto de texto inclui o SVG. A abordagem correta é
+    navegar até o <span> com normalize-space() e subir para o <button>.
+    """
+    # ── Abre modal ────────────────────────────────────────────────────────────
+    SeleniumRequester.aguardar_e_clicar(
+        wdw,
+        (
+            By.XPATH,
+            '//button[contains(text(),"Gerar Relatório")]',
+        ),
+        "Gerar Relatório",
+    )
+
+    # ── Aguarda modal ─────────────────────────────────────────────────────────
+    SeleniumRequester.aguardar_visivel(
+        wdw,
+        (By.XPATH, '//h6[text()="Gerar relatório"]'),
+    )
+
+    # ── Seleciona CSV ─────────────────────────────────────────────────────────
+    SeleniumRequester.selecionar_opcao_combobox(
+        wdw,
+        locator_combobox=(
+            By.XPATH,
+            '//label[text()="Gerar relatório como"]'
+            '/following::div[@role="combobox"][1]',
+        ),
+        locator_opcao=(
+            By.XPATH,
+            '//li[@role="option" and text()="CSV"]',
+        ),
+    )
+    sleep(1)
+
+    # ── Exporta ───────────────────────────────────────────────────────────────
+    SeleniumRequester.aguardar_e_clicar(
+        wdw,
+        (By.XPATH, '//button[normalize-space(text())="Exportar"]'),
+        "Exportar",
+    )
+
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+    extrair_consulta_parcela()
