@@ -159,7 +159,6 @@ def extrair_consulta_parcela(
 
     finally:
         print('chegou aqui')
-        breakpoint()
         driver.quit()
         logger.info("Driver encerrado.")
 

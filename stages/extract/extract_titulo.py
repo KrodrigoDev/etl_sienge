@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import logging
 import shutil
+from datetime import date
 from pathlib import Path
-from time import sleep
+from time import sleep, time
 
 import pandas as pd
 
@@ -27,14 +28,14 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import (
     TimeoutException,
-    StaleElementReferenceException
+    StaleElementReferenceException,
 )
 
 from src.drivers.selenium_requester import BASE_URL, SeleniumRequester
 
 logger = logging.getLogger(__name__)
 
-URL_ADIANTAMENTO = f"{BASE_URL}/8/index.html#/common/page/660"
+URL_ADIANTAMENTO = f"{BASE_URL}/8/index.html#/common/page/373"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -100,6 +101,7 @@ def verificar_sem_dados(driver, wdw) -> bool:
 def extrair_adiantamento(
         destino: Path | None = None,
         data_inicio: str | None = None,
+        data_final: str | None = None
 ) -> None:
     """
     Executa a extração do relatório de adiantamentos empresa a empresa.
@@ -112,12 +114,15 @@ def extrair_adiantamento(
                   Padrão: 01/01/2014
     """
     if data_inicio is None:
-        data_inicio = "01/01/2014"
+        data_inicio = "01/01/2025"
+
+    if data_final is None:
+        data_final = date.today().strftime("%d/%m/%Y")
 
     req = SeleniumRequester()
     req.ensure_login()
 
-    destino = destino or (req.download_dir / "adiantamento")
+    destino = destino or (req.download_dir / "titulo")
     destino.mkdir(parents=True, exist_ok=True)
 
     driver = req.get_driver()
@@ -128,7 +133,7 @@ def extrair_adiantamento(
         req.navegacao_inicial(driver, wdw)
 
         # ── 2. Navega para o relatório ───────────────────────────────────────
-        logger.info("Navegando para o relatório de adiantamentos...")
+        logger.info("Navegando para o relatório de títulos...")
         driver.get(URL_ADIANTAMENTO)
         sleep(2)
 
@@ -141,24 +146,38 @@ def extrair_adiantamento(
         driver.switch_to.frame(frame)
 
         logger.info("Preenchendo filtros fixos")
-        req.aguardar_e_clicar(wdw, (By.CSS_SELECTOR, "#flTituloVinculadoA"))
-        req.aguardar_e_clicar(wdw, (By.CSS_SELECTOR, "#flOrdenacaoA"))
+         # ativar títulos de previsão
+
+
+
+        # req.aguardar_e_clicar(wdw, (By.CSS_SELECTOR, "#flTituloVinculadoA"))
+        # req.aguardar_e_clicar(wdw, (By.CSS_SELECTOR, "#flOrdenacaoA"))
+
         req.preencher_campo(
             wdw,
-            (By.CSS_SELECTOR, 'input[name="dtEmissaoInicio"]'),
+            (By.CSS_SELECTOR, 'input[name="dtInicio"]'),
             data_inicio,
+        )
+
+        req.preencher_campo(
+            wdw,
+            (By.CSS_SELECTOR, 'input[name="dtFim"]'),
+            data_final,
         )
 
         sleep(0.5)
 
         # ── 4. Carrega lista de empresas ─────────────────────────────────────
+
         dim_empresas = pd.read_csv(
-            req.project_root / "stages/extract/reference/dim_empresa.csv",
+            req.project_root / "stages/transform/output/fato_consulta_parcela.csv",
             sep=";",
         )
+
         lista_empresas = (
-            dim_empresas["cod_empresa"].dropna().astype(str).unique().tolist()
+            dim_empresas["cod_empresa"].dropna().astype(int).unique().tolist()
         )
+
         logger.info("Total de empresas: %d", len(lista_empresas))
 
         janela_principal = driver.current_window_handle

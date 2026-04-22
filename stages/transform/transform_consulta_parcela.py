@@ -64,8 +64,8 @@ from stages.transform.utils.normalizer import (
 
 pasta_origem = Path(__file__).resolve().parents[2]
 
-INPUT_DIR   = pasta_origem / "stages" / "transform" / "input"
-OUTPUT_DIR  = pasta_origem / "stages" / "transform" / "output"
+INPUT_DIR = pasta_origem / "stages" / "transform" / "input"
+OUTPUT_DIR = pasta_origem / "stages" / "transform" / "output"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -96,16 +96,16 @@ def _parse_banco(texto: str | float) -> dict:
         return m.group(1).strip() if m else ""
 
     cod_nome = _get(r"Banco:\s*(\d+\s+[^/]+)")
-    partes   = cod_nome.split(" ", 1) if cod_nome else ["", ""]
+    partes = cod_nome.split(" ", 1) if cod_nome else ["", ""]
 
     return dict(
-        banco_cod        = partes[0].strip(),
-        banco_nome       = partes[1].strip() if len(partes) > 1 else "",
-        agencia          = _get(r"Agência:\s*([^/]+)").replace("__", "").strip(),
-        conta            = _get(r"N° conta:\s*([^/]+)").replace("__", "").strip(),
-        tipo_conta       = _get(r"Tipo conta:\s*([^/]+)").replace("__", "").strip(),
-        cnpj_favorecido  = _get(r"CNPJ/CPF:\s*([^/]+)").replace("__", "").strip(),
-        favorecido_banco = _get(r"Favorecido:\s*(.+)$").strip(),
+        banco_cod=partes[0].strip(),
+        banco_nome=partes[1].strip() if len(partes) > 1 else "",
+        agencia=_get(r"Agência:\s*([^/]+)").replace("__", "").strip(),
+        conta=_get(r"N° conta:\s*([^/]+)").replace("__", "").strip(),
+        tipo_conta=_get(r"Tipo conta:\s*([^/]+)").replace("__", "").strip(),
+        cnpj_favorecido=_get(r"CNPJ/CPF:\s*([^/]+)").replace("__", "").strip(),
+        favorecido_banco=_get(r"Favorecido:\s*(.+)$").strip(),
     )
 
 
@@ -117,20 +117,21 @@ def _parse_pix(texto: str | float) -> dict:
     vazio = dict(pix_tipo_chave="", pix_chave="")
     if not isinstance(texto, str):
         return vazio
+
     def _get(pattern: str) -> str:
         m = re.search(pattern, texto)
         val = m.group(1).strip() if m else ""
         return "" if val == "__" else val
 
     return dict(
-        pix_tipo_chave = _get(r"Tipo de chave:\s*([^/]+)"),
-        pix_chave      = _get(r"Chave pix:\s*([^/]+)"),
+        pix_tipo_chave=_get(r"Tipo de chave:\s*([^/]+)"),
+        pix_chave=_get(r"Chave pix:\s*([^/]+)"),
     )
 
 
 def _faixa_atraso(dias: pd.Series) -> pd.Series:
     """Categoriza dias de atraso em faixas para uso em visuais de BI."""
-    bins   = [-1, 0, 7, 14, 21, 28, float("inf")]
+    bins = [-1, 0, 7, 14, 21, 28, float("inf")]
     labels = ["Em dia", "1-7d", "8-14d", "15-21d", "22-28d", "29+d"]
     return pd.cut(dias.fillna(0), bins=bins, labels=labels, right=True)
 
@@ -173,6 +174,10 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     df = ler_dados((input_dir / "consulta_parcela").glob("*.csv"))
     df = normalizar_colunas(df)
 
+    print(f'Antes de retirar as duplicatas: {df.shape}')
+    # df.drop_duplicates(subset='grupo', inplace=True)
+    print(f'Depois de retirar as duplicatas: {df.shape}')
+
     print(f"  Total de linhas no começo da fato: {len(df):,}")
     print(f"  Total de colunas: {len(df.columns)}")
 
@@ -212,9 +217,9 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
             df[col] = _parse_date(df[col])
 
     # — Inteiros simples —
-    df["titulo"]       = pd.to_numeric(df.get("titulo"), errors="coerce").astype("Int64")
-    df["cod_empresa"]  = pd.to_numeric(df.get("cod_empresa"), errors="coerce").astype("Int64")
-    df["cod_credor"]   = pd.to_numeric(df.get("cod_credor"), errors="coerce").astype("Int64")
+    df["titulo"] = pd.to_numeric(df.get("titulo"), errors="coerce").astype("Int64")
+    df["cod_empresa"] = pd.to_numeric(df.get("cod_empresa"), errors="coerce").astype("Int64")
+    df["cod_credor"] = pd.to_numeric(df.get("cod_credor"), errors="coerce").astype("Int64")
     df["dias_de_atraso"] = pd.to_numeric(df.get("dias_de_atraso"), errors="coerce").fillna(0).astype(int)
 
     # diferenca_data_vencimento pode vir como "0", "-5", "14" etc.
@@ -229,28 +234,28 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     print("\n── 3. Flags calculadas ─────────────────────────────────────────────")
 
     data_hoje = pd.Timestamp(hoje)
+    data_ontem = data_hoje - pd.Timedelta(days=1)
 
-    df["flag_vencida"]         = df["status_da_parcela"] == "VENCIDA"
-    df["flag_a_vencer"]        = df["status_da_parcela"] == "A_VENCER"
-    df["flag_paga"]            = df["status_da_parcela"] == "PAGA"
-    df["flag_vence_hoje"]      = df["data_vencimento"] == data_hoje
+    df["flag_vencida"] = df["status_da_parcela"] == "VENCIDA"
+    df["flag_a_vencer"] = df["status_da_parcela"] == "A_VENCER"
+    df["flag_paga"] = df["status_da_parcela"] == "PAGA"
+    df["flag_vence_hoje"] = df["data_vencimento"] == data_hoje
     df["flag_pago_antecipado"] = (
-        df["data_do_pagamento"].notna()
-        & df["data_vencimento"].notna()
-        & (df["data_do_pagamento"] < df["data_vencimento"])
+            df["data_do_pagamento"].notna()
+            & df["data_vencimento"].notna()
+            & (df["data_do_pagamento"] < df["data_vencimento"])
     )
-    df["flag_pago_atraso"]     = (
-        df["data_do_pagamento"].notna()
-        & df["data_vencimento"].notna()
-        & (df["data_do_pagamento"] > df["data_vencimento"])
+    df["flag_pago_atraso"] = (
+            df["data_do_pagamento"].notna()
+            & df["data_vencimento"].notna()
+            & (df["data_do_pagamento"] > df["data_vencimento"])
     )
-    df["flag_substituida"]     = df.get("tipo_de_baixa", "") == "SUBSTITUICAO"
-    df["flag_critico"]         = df["dias_de_atraso"] >= 15
-    df["flag_sem_credor"]      = df["cod_credor"].isna()
+    df["flag_substituida"] = df.get("tipo_de_baixa", "") == "SUBSTITUICAO"
+    df["flag_critico"] = df["dias_de_atraso"] >= 15
+    df["flag_sem_credor"] = df["cod_credor"].isna()
     # Obra/CC/Dpto chegam 100% NULL nesta consulta — flag de qualidade para o futuro
-    df["flag_sem_obra"]        = df.get("cod_obra", pd.Series(np.nan, index=df.index)).isna()
-    df["flag_autorizada"]      = df.get("parcela_autorizada", "").str.strip().str.lower() == "sim"
-
+    df["flag_sem_obra"] = df.get("cod_obra", pd.Series(np.nan, index=df.index)).isna()
+    df["flag_autorizada"] = df.get("parcela_autorizada", "").str.strip().str.lower() == "sim"
 
     # Identifica vencimentos em fim de semana (sáb=5, dom=6)
     df["flag_venc_fds"] = df["data_vencimento"].dt.dayofweek.isin([5, 6])
@@ -273,10 +278,12 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
             & df["flag_vencida"]  # ainda não paga
     )
 
+    df["flag_venceu_ontem"] = (
+            df["data_vencimento"].dt.normalize() == data_ontem
+    )
 
-
-    df["faixa_atraso"]         = _faixa_atraso(df["dias_de_atraso"]).astype(str)
-    df["faixa_saldo"]         = _faixa_saldo(df["saldo_em_aberto"])
+    df["faixa_atraso"] = _faixa_atraso(df["dias_de_atraso"]).astype(str)
+    df["faixa_saldo"] = _faixa_saldo(df["saldo_em_aberto"])
 
     print(f"  flag_vencida:          {df['flag_vencida'].sum():,}")
     print(f"  flag_vence_hoje:       {df['flag_vence_hoje'].sum():,}")
@@ -289,10 +296,10 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     print("\n── 4. Parse de dados bancários / PIX ───────────────────────────────")
 
     banco_parsed = df["informacoes_bancarias_do_credor"].apply(_parse_banco)
-    pix_parsed   = df["pix_do_credor"].apply(_parse_pix)
+    pix_parsed = df["pix_do_credor"].apply(_parse_pix)
 
     df_banco = pd.DataFrame(list(banco_parsed), index=df.index)
-    df_pix   = pd.DataFrame(list(pix_parsed),   index=df.index)
+    df_pix = pd.DataFrame(list(pix_parsed), index=df.index)
 
     df = pd.concat([df, df_banco, df_pix], axis=1)
 
@@ -304,7 +311,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     # ── 5. Carregar dimensões existentes ──────────────────────────────────────
     print("\n── 5. Carregando dimensões existentes ──────────────────────────────")
 
-    dim_empresa    = pd.read_csv(output_dir / "dim_empresa.csv",    sep=";")
+    dim_empresa = pd.read_csv(output_dir / "dim_empresa.csv", sep=";")
 
     print(f"  dim_empresa:    {dim_empresa.shape}")
 
@@ -312,14 +319,14 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     print("\n── 6. Expandindo dim_empresa ───────────────────────────────────────")
 
     dim_empresa = expandir_dimensao(
-        dim_existente  = dim_empresa,
-        df_novo        = df.rename(columns={
+        dim_existente=dim_empresa,
+        df_novo=df.rename(columns={
             "cod_empresa": "cod_empresa",
-            "empresa":     "empresa",
+            "empresa": "empresa",
         }),
-        colunas_naturais = ["cod_empresa", "empresa"],
-        nome_id          = "id_empresa",
-        col_pk_natural   = "cod_empresa",
+        colunas_naturais=["cod_empresa", "empresa"],
+        nome_id="id_empresa",
+        col_pk_natural="cod_empresa",
     )
 
     print(f"  dim_empresa após expansão: {dim_empresa.shape}")
@@ -342,9 +349,9 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         .drop_duplicates(subset="cod_credor", keep="last")
         .drop_duplicates(subset="cod_credor", keep="last")
         .rename(columns={
-            "credor":           "nome_fornecedor",
-            "cnpj/cpf":         "cnpj_cpf",
-            "tipo_credor":      "tipo_credor",
+            "credor": "nome_fornecedor",
+            "cnpj/cpf": "cnpj_cpf",
+            "tipo_credor": "tipo_credor",
             "forma_de_pagamento": "forma_pagamento_padrao",
         })
     )
@@ -363,22 +370,21 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     dim_fornecedor["cod_credor"] = dim_fornecedor["cod_credor"].astype("Int64")
 
     dim_fornecedor = criar_dimensao(dim_fornecedor, colunas=[
-            "cod_credor", "nome_fornecedor", "cnpj_cpf", "tipo_credor",
-            "banco_cod", "banco_nome", "agencia", "conta", "tipo_conta",
-            "cnpj_favorecido", "favorecido_banco",
-            "pix_tipo_chave", "pix_chave", "forma_pagamento_padrao",
-        ], nome_id='id_fornecedor')
-
+        "cod_credor", "nome_fornecedor", "cnpj_cpf", "tipo_credor",
+        "banco_cod", "banco_nome", "agencia", "conta", "tipo_conta",
+        "cnpj_favorecido", "favorecido_banco",
+        "pix_tipo_chave", "pix_chave", "forma_pagamento_padrao",
+    ], nome_id='id_fornecedor')
 
     # ── 8. Dimensões pequenas (geradas/sobrescritas integralmente aqui) ───────
     print("\n── 8. Dimensões de domínio ─────────────────────────────────────────")
 
     # dim_status
     dim_status = pd.DataFrame([
-        {"id_status": 1, "status_parcela": "PAGA",     "grupo_status": "Quitado"},
-        {"id_status": 2, "status_parcela": "VENCIDA",  "grupo_status": "Inadimplente"},
+        {"id_status": 1, "status_parcela": "PAGA", "grupo_status": "Quitado"},
+        {"id_status": 2, "status_parcela": "VENCIDA", "grupo_status": "Inadimplente"},
         {"id_status": 3, "status_parcela": "A_VENCER", "grupo_status": "Em dia"},
-        {"id_status": 0, "status_parcela": "SEM_STATUS","grupo_status": "Indefinido"},
+        {"id_status": 0, "status_parcela": "SEM_STATUS", "grupo_status": "Indefinido"},
     ])
 
     # dim_tipo_baixa — derivada dos valores distintos presentes no dado
@@ -389,19 +395,19 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         .tolist()
     )
     dim_tipo_baixa = pd.DataFrame({
-        "id_tipo_baixa":  range(1, len(tipos_baixa) + 1),
-        "tipo_baixa":     tipos_baixa,
+        "id_tipo_baixa": range(1, len(tipos_baixa) + 1),
+        "tipo_baixa": tipos_baixa,
     })
     # descrição legível
     _desc = {
-        "PAGAMENTO":              "Pagamento normal",
-        "SUBSTITUICAO":           "Substituição / renegociação",
-        "CANCELAMENTO":           "Cancelamento",
-        "ABATIMENTO_ADIANTAMENTO":"Abatimento de adiantamento",
-        "ADIANTAMENTO":           "Adiantamento",
-        "OUTROS":                 "Outros",
-        "ESTORNO":                "Estorno de baixa",
-        "DEVOLUCAO":              "Devolução",
+        "PAGAMENTO": "Pagamento normal",
+        "SUBSTITUICAO": "Substituição / renegociação",
+        "CANCELAMENTO": "Cancelamento",
+        "ABATIMENTO_ADIANTAMENTO": "Abatimento de adiantamento",
+        "ADIANTAMENTO": "Adiantamento",
+        "OUTROS": "Outros",
+        "ESTORNO": "Estorno de baixa",
+        "DEVOLUCAO": "Devolução",
     }
     dim_tipo_baixa["descricao"] = dim_tipo_baixa["tipo_baixa"].map(_desc).fillna(
         dim_tipo_baixa["tipo_baixa"]
@@ -410,21 +416,21 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     # dim_origem
     origens = df["origem"].dropna().unique().tolist()
     dim_origem = pd.DataFrame({
-        "id_origem":  range(1, len(origens) + 1),
-        "origem":     origens,
+        "id_origem": range(1, len(origens) + 1),
+        "origem": origens,
     })
 
     # dim_forma_pagamento
     formas = df["forma_de_pagamento"].dropna().unique().tolist()
     dim_forma_pagamento = pd.DataFrame({
         "id_forma_pagamento": range(1, len(formas) + 1),
-        "forma_pagamento":    formas,
+        "forma_pagamento": formas,
     })
 
     for dim, nome in [
-        (dim_status,          "dim_status"),
-        (dim_tipo_baixa,      "dim_tipo_baixa"),
-        (dim_origem,          "dim_origem"),
+        (dim_status, "dim_status"),
+        (dim_tipo_baixa, "dim_tipo_baixa"),
+        (dim_origem, "dim_origem"),
         (dim_forma_pagamento, "dim_forma_pagamento"),
     ]:
         print(f"  {nome}: {dim.shape}")
@@ -448,36 +454,29 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         .to_dict()
     )
 
-    _status_map   = dim_status.set_index("status_parcela")["id_status"].to_dict()
-    _baixa_map    = dim_tipo_baixa.set_index("tipo_baixa")["id_tipo_baixa"].to_dict()
-    _origem_map   = dim_origem.set_index("origem")["id_origem"].to_dict()
-    _forma_map    = dim_forma_pagamento.set_index("forma_pagamento")["id_forma_pagamento"].to_dict()
+    _status_map = dim_status.set_index("status_parcela")["id_status"].to_dict()
+    _baixa_map = dim_tipo_baixa.set_index("tipo_baixa")["id_tipo_baixa"].to_dict()
+    _origem_map = dim_origem.set_index("origem")["id_origem"].to_dict()
+    _forma_map = dim_forma_pagamento.set_index("forma_pagamento")["id_forma_pagamento"].to_dict()
 
     # Preenche cod_credor NULL com 0 (INTERNO) antes do mapeamento
     df["cod_credor_lookup"] = df["cod_credor"].fillna(0).astype(int)
 
-    df["id_empresa"]          = df["cod_empresa"].map(_emp_map)
-    df["id_fornecedor"]       = df["cod_credor_lookup"].map(_forn_map)
-    df["id_status"]           = df["status_da_parcela"].map(_status_map).fillna(0).astype(int)
-    df["id_tipo_baixa"]       = df["tipo_de_baixa"].map(_baixa_map)
-    df["id_origem"]           = df["origem"].map(_origem_map)
-    df["id_forma_pagamento"]  = df["forma_de_pagamento"].map(_forma_map)
-
-    # Surrogate keys de data — usam a data como string YYYY-MM-DD para join
-    # com a dim_data gerada separadamente (calendário)
-    # df["id_data_vencimento"] = df["data_vencimento"].dt.strftime("%Y%m%d").astype("Int64")
-    # df["id_data_pagamento"]  = df["data_do_pagamento"].dt.strftime("%Y%m%d").astype("Int64")
-    # df["id_data_emissao"]    = df["data_emissao"].dt.strftime("%Y%m%d").astype("Int64")
-    # df["id_data_competencia"]= df["data_de_competencia"].dt.strftime("%Y%m%d").astype("Int64")
+    df["id_empresa"] = df["cod_empresa"].map(_emp_map)
+    df["id_fornecedor"] = df["cod_credor_lookup"].map(_forn_map)
+    df["id_status"] = df["status_da_parcela"].map(_status_map).fillna(0).astype(int)
+    df["id_tipo_baixa"] = df["tipo_de_baixa"].map(_baixa_map)
+    df["id_origem"] = df["origem"].map(_origem_map)
+    df["id_forma_pagamento"] = df["forma_de_pagamento"].map(_forma_map)
 
     for col_id, total in [
-        ("id_empresa",   len(df)),
-        ("id_fornecedor",len(df)),
-        ("id_status",    len(df)),
-        ("id_origem",    len(df)),
+        ("id_empresa", len(df)),
+        ("id_fornecedor", len(df)),
+        ("id_status", len(df)),
+        ("id_origem", len(df)),
     ]:
         matched = df[col_id].notna().sum()
-        print(f"  {col_id:<22} {matched:,} / {total:,}  ({matched/total:.1%})")
+        print(f"  {col_id:<22} {matched:,} / {total:,}  ({matched / total:.1%})")
 
     # ── 10. Montar fato_consulta_parcela ──────────────────────────────────────
     print("\n── 10. fato_consulta_parcela ───────────────────────────────────────")
@@ -490,18 +489,14 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         "id_tipo_baixa",
         "id_origem",
         "id_forma_pagamento",
-        # "id_data_vencimento", # verificar se vou retirar
-        # "id_data_pagamento",
-        # "id_data_emissao",
-        # "id_data_competencia",
 
         # ── Chaves naturais (dimensões degeneradas) ───────────────
         "cod_empresa",
         "cod_credor",
         "titulo",
-        "parcela",          # ex: "7/36"
-        "grupo",            # ex: "396550/7" (titulo/parcela original)
-        "documento",        # tipo do documento: NF, AV, NFS, APT…
+        "parcela",  # ex: "7/36"
+        "grupo",  # ex: "396550/7" (titulo/parcela original)
+        "documento",  # tipo do documento: NF, AV, NFS, APT…
         "nn_documento",
         "conta_contabil",
 
@@ -545,6 +540,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         "flag_venc_fds",
         "proximo_util_apos_fds",
         "flag_venc_fds_paga_hoje",
+        "flag_venceu_ontem",
 
         # ── Atributos de workflow / auditoria ─────────────────────
         "ciencia_do_titulo",
@@ -583,7 +579,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     print("\n── 11. Validação ───────────────────────────────────────────────────")
 
     checar_integridade(
-        fato, "id_empresa",    dim_empresa,    "id_empresa",
+        fato, "id_empresa", dim_empresa, "id_empresa",
         "fato_consulta_parcela → dim_empresa"
     )
     checar_integridade(
@@ -591,11 +587,11 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         "fato_consulta_parcela → dim_fornecedor"
     )
     checar_integridade(
-        fato, "id_status",     dim_status,     "id_status",
+        fato, "id_status", dim_status, "id_status",
         "fato_consulta_parcela → dim_status"
     )
     checar_integridade(
-        fato, "id_origem",     dim_origem,     "id_origem",
+        fato, "id_origem", dim_origem, "id_origem",
         "fato_consulta_parcela → dim_origem"
     )
 
@@ -603,13 +599,13 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     print("\n── 12. Exportação ──────────────────────────────────────────────────")
 
     # Dimensões expandidas — sobrescreve o que o transform_adiantamento gerou
-    salvar_tabela(dim_empresa,    "dim_empresa",    output_dir)
+    salvar_tabela(dim_empresa, "dim_empresa", output_dir)
     salvar_tabela(dim_fornecedor, "dim_fornecedor_consulta_parcela", output_dir)
 
     # Dimensões de domínio (geradas aqui, sobrescritas a cada run)
-    salvar_tabela(dim_status,          "dim_status",          output_dir)
-    salvar_tabela(dim_tipo_baixa,      "dim_tipo_baixa",      output_dir)
-    salvar_tabela(dim_origem,          "dim_origem",          output_dir)
+    salvar_tabela(dim_status, "dim_status", output_dir)
+    salvar_tabela(dim_tipo_baixa, "dim_tipo_baixa", output_dir)
+    salvar_tabela(dim_origem, "dim_origem", output_dir)
     salvar_tabela(dim_forma_pagamento, "dim_forma_pagamento", output_dir)
 
     # Fato principal
@@ -617,13 +613,13 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
 
     print("\n── Resumo final ────────────────────────────────────────────────────")
     for nome, tabela in {
-        "dim_empresa (expandida)":    dim_empresa,
+        "dim_empresa (expandida)": dim_empresa,
         "dim_fornecedor (expandida)": dim_fornecedor,
-        "dim_status":                 dim_status,
-        "dim_tipo_baixa":             dim_tipo_baixa,
-        "dim_origem":                 dim_origem,
-        "dim_forma_pagamento":        dim_forma_pagamento,
-        "fato_consulta_parcela":      fato,
+        "dim_status": dim_status,
+        "dim_tipo_baixa": dim_tipo_baixa,
+        "dim_origem": dim_origem,
+        "dim_forma_pagamento": dim_forma_pagamento,
+        "fato_consulta_parcela": fato,
     }.items():
         print(f"  {nome:<35} {str(tabela.shape):>12}")
 

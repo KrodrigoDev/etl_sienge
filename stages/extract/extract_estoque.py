@@ -105,13 +105,15 @@ def extrair_estoque(
                 (By.XPATH, f'//li[@role="option" and starts-with(normalize-space(), "{cod_obra} -")]'),
             )
 
-            input_obra.send_keys(Keys.CONTROL, "a")
-            input_obra.send_keys(Keys.DELETE)
 
             req.aguardar_e_clicar(
                 wdw,
                 (By.XPATH, f'//li[@role="option" and starts-with(normalize-space(), "{cod_obra} -")]'),
             )
+
+            input_obra.send_keys(Keys.CONTROL, "a")
+            input_obra.send_keys(Keys.DELETE)
+
 
             sleep(1)
 
