@@ -98,7 +98,7 @@ def verificar_sem_dados(driver, wdw) -> bool:
 # EXTRAÇÃO PRINCIPAL
 # ─────────────────────────────────────────────────────────────────────────────
 
-def extrair_adiantamento(
+def extrair_titulo(
         destino: Path | None = None,
         data_inicio: str | None = None,
         data_final: str | None = None
@@ -114,7 +114,7 @@ def extrair_adiantamento(
                   Padrão: 01/01/2014
     """
     if data_inicio is None:
-        data_inicio = "01/01/2025"
+        data_inicio = "01/01/2024"
 
     if data_final is None:
         data_final = date.today().strftime("%d/%m/%Y")
@@ -215,7 +215,7 @@ def extrair_adiantamento(
 
             arquivo_baixado = req.aguardar_download(
                 extensao=".xlsx",
-                timeout=35
+                timeout=240
             )
 
             # 5g. Move o arquivo para o destino com nome identificável
@@ -247,5 +247,5 @@ if __name__ == "__main__":
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
-    extrair_adiantamento()
+    extrair_titulo()
     print("Extração concluída.")

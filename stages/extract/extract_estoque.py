@@ -135,6 +135,8 @@ def extrair_estoque(
         except Exception:
             logger.info("Botão Consultar não encontrado — tela carregou automaticamente.")
 
+        req.aguardar_carregamento_tabela(driver)
+
         # ── 7. Seleciona 'Todas' as linhas ────────────────────────────────────
         logger.info("Selecionando todas as linhas...")
         driver.find_element(

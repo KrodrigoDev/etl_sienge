@@ -177,7 +177,7 @@ def extrair_adiantamento(
             input_empresa.send_keys(cod_empresa)
             input_empresa.send_keys(Keys.ENTER)
 
-            sleep(0.5)
+            sleep(1)
 
             # 5c. Clica em Visualizar
             req.aguardar_e_clicar(
@@ -196,7 +196,7 @@ def extrair_adiantamento(
 
             arquivo_baixado = req.aguardar_download(
                 extensao=".xlsx",
-                timeout=35
+                timeout=40
             )
 
             # 5g. Move o arquivo para o destino com nome identificável

@@ -158,7 +158,7 @@ def extrair_consulta_parcela(
             req.aguardar_carregamento_tabela(driver)
 
     finally:
-        print('chegou aqui')
+
         driver.quit()
         logger.info("Driver encerrado.")
 

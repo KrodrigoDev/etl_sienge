@@ -104,6 +104,8 @@ def extrair_servicos(
             "Consultar",
         )
 
+        req.aguardar_carregamento_tabela(driver)
+
         req.aguardar_presenca(
             wdw,
             (By.XPATH, '//div[contains(@class,"MuiTablePagination-select")]'),

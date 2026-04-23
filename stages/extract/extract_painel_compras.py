@@ -104,6 +104,8 @@ def extrair_painel_compras(
             "Consultar",
         )
 
+        req.aguardar_carregamento_tabela(driver)
+
         req.aguardar_presenca(
             wdw,
             (By.XPATH, '//div[contains(@class,"MuiTablePagination-select")]'),
@@ -115,7 +117,8 @@ def extrair_painel_compras(
         driver.find_element(
             By.XPATH, '//div[contains(@class,"MuiTablePagination-select")]'
         ).click()
-        sleep(2)
+
+        sleep(3)
 
         req.aguardar_e_clicar(
             wdw,

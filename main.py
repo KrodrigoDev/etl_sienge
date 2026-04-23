@@ -9,6 +9,8 @@ Etapas de extração (ordem obrigatória):
   3. servico
   4. contrato
   5. adiantamento
+  6. consulta_parcela
+  7. titulo (Se atentar porque ela depende do fato_consulta_parcela)
 
 Etapas de transformação (após extract):
   → transform_painel_compras  (roda primeiro — gera as dims base)
@@ -16,6 +18,8 @@ Etapas de transformação (após extract):
   → transform_servico
   → transform_contrato
   → transform_adiantamento
+  → transform_consulta_parcela
+  → transform_titulo
 
 Uso:
     python main.py                                # extrai tudo + transforma tudo
@@ -137,6 +141,27 @@ def etapa_extract_adiantamento(data_inicio: str) -> None:
     )
     logger.info("Adiantamento extraído.")
 
+def etapa_extract_consulta_parcela(data_inicio: str) -> None:
+    from stages.extract.extract_consulta_parcela import extrair_consulta_parcela
+
+    _secao("EXTRACT — Consulta Parcela")
+    extrair_consulta_parcela(
+        data_inicio=data_inicio,
+        destino=INPUT_DIR / "consulta_parcela",
+    )
+    logger.info("Consulta Parcela extraído.")
+
+
+def etapa_extract_titulo(data_inicio: str) -> None:
+    from stages.extract.extract_titulo import extrair_titulo
+
+    _secao("EXTRACT — Título")
+    extrair_titulo(
+        data_inicio=data_inicio,
+        destino=INPUT_DIR / "titulo",
+    )
+    logger.info("Consulta Título extraído.")
+
 
 def etapa_extract(data_inicio: str) -> None:
     """Roda todos os extractors na ordem definida."""
@@ -147,6 +172,8 @@ def etapa_extract(data_inicio: str) -> None:
     etapa_extract_servico("01/01/2014")
     etapa_extract_contrato("01/01/2014")
     etapa_extract_adiantamento("01/01/2014")
+    etapa_extract_consulta_parcela("01/01/2026")
+    etapa_extract_titulo('01/01/2024')
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -201,6 +228,22 @@ def etapa_transform_adiantamento() -> None:
     logger.info("Transform adiantamento concluído.")
 
 
+def etapa_transform_consulta_parcela() -> None:
+    from stages.transform.transform_consulta_parcela import executar
+
+    _secao("TRANSFORM — Consulta Parcela")
+    executar(input_dir=INPUT_DIR, output_dir=OUTPUT_DIR)
+    logger.info("Transform consulta parcela concluído.")
+
+
+def etapa_transform_titulo() -> None:
+    from stages.transform.transform_titulo import executar
+
+    _secao("TRANSFORM — Título")
+    executar(input_dir=INPUT_DIR, output_dir=OUTPUT_DIR)
+    logger.info("Transform Título concluído.")
+
+
 def etapa_transform() -> None:
     """
     Roda todos os transforms na ordem correta.
@@ -211,6 +254,8 @@ def etapa_transform() -> None:
     etapa_transform_servico()
     etapa_transform_contrato()
     etapa_transform_adiantamento()
+    etapa_transform_consulta_parcela()
+    etapa_transform_titulo()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -225,6 +270,8 @@ _ETAPAS_VALIDAS = [
     "extract_servico",
     "extract_contrato",
     "extract_adiantamento",
+    "extract_consulta_parcela",
+    "extract_titulo",
     "transform",
     "transform_painel_compras",
     "transform_estoque",
@@ -280,6 +327,12 @@ def main() -> None:
 
     elif args.etapa == "extract_adiantamento":
         etapa_extract_adiantamento(args.data_inicio)
+
+    elif args.etapa == "extract_consulta_parcela":
+        etapa_extract_consulta_parcela(args.data_inicio)
+
+    elif args.etapa == "extract_titulo":
+        etapa_extract_titulo(args.data_inicio)
 
     # ── Transform individuais ─────────────────────────────────────────────────
     elif args.etapa == "transform_painel_compras":

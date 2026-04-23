@@ -96,6 +96,7 @@ def extrair_contratos(
         )
         sleep(1)
 
+
         # ── 5. Consultar ──────────────────────────────────────────────────────
         logger.info("Consultando...")
         req.aguardar_e_clicar(
@@ -103,6 +104,8 @@ def extrair_contratos(
             (By.XPATH, '//button[@type="submit" and .//text()[contains(.,"Consultar")]]'),
             "Consultar",
         )
+
+        req.aguardar_carregamento_tabela(driver)
 
         req.aguardar_presenca(
             wdw,
