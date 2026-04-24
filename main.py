@@ -152,12 +152,11 @@ def etapa_extract_consulta_parcela(data_inicio: str) -> None:
     logger.info("Consulta Parcela extraído.")
 
 
-def etapa_extract_titulo(data_inicio: str) -> None:
+def etapa_extract_titulo() -> None:
     from stages.extract.extract_titulo import extrair_titulo
 
     _secao("EXTRACT — Título")
     extrair_titulo(
-        data_inicio=data_inicio,
         destino=INPUT_DIR / "titulo",
     )
     logger.info("Consulta Título extraído.")
@@ -173,7 +172,7 @@ def etapa_extract(data_inicio: str) -> None:
     etapa_extract_contrato("01/01/2014")
     etapa_extract_adiantamento("01/01/2014")
     etapa_extract_consulta_parcela("01/01/2026")
-    etapa_extract_titulo('01/01/2024')
+    etapa_extract_titulo()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -332,7 +331,7 @@ def main() -> None:
         etapa_extract_consulta_parcela(args.data_inicio)
 
     elif args.etapa == "extract_titulo":
-        etapa_extract_titulo(args.data_inicio)
+        etapa_extract_titulo()
 
     # ── Transform individuais ─────────────────────────────────────────────────
     elif args.etapa == "transform_painel_compras":
@@ -349,6 +348,12 @@ def main() -> None:
 
     elif args.etapa == "transform_adiantamento":
         etapa_transform_adiantamento()
+
+    elif args.etapa == "transform_consulta_parcela":
+        etapa_transform_consulta_parcela()
+
+    elif args.etapa == "transform_titulo":
+        etapa_transform_titulo()
 
     # ── Blocos completos ──────────────────────────────────────────────────────
     elif args.etapa == "extract":

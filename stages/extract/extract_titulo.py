@@ -20,7 +20,7 @@ import logging
 import shutil
 from datetime import date
 from pathlib import Path
-from time import sleep, time
+from time import sleep
 
 import pandas as pd
 
@@ -100,24 +100,13 @@ def verificar_sem_dados(driver, wdw) -> bool:
 
 def extrair_titulo(
         destino: Path | None = None,
-        data_inicio: str | None = None,
-        data_final: str | None = None
 ) -> None:
     """
-    Executa a extração do relatório de adiantamentos empresa a empresa.
+    Executa a extração do relatório de titulos empresa a empresa pelos anos de emissão.
 
     Parâmetros
     ----------
-    destino     : pasta onde os XLSX serão salvos.
-                  Padrão: <download_dir>/adiantamento/
-    data_inicio : filtro de data inicial no formato DD/MM/AAAA.
-                  Padrão: 01/01/2014
     """
-    if data_inicio is None:
-        data_inicio = "01/01/2024"
-
-    if data_final is None:
-        data_final = date.today().strftime("%d/%m/%Y")
 
     req = SeleniumRequester()
     req.ensure_login()
@@ -145,27 +134,6 @@ def extrair_titulo(
         frame = driver.find_element(By.ID, "iFramePage")
         driver.switch_to.frame(frame)
 
-        logger.info("Preenchendo filtros fixos")
-         # ativar títulos de previsão
-
-
-
-        # req.aguardar_e_clicar(wdw, (By.CSS_SELECTOR, "#flTituloVinculadoA"))
-        # req.aguardar_e_clicar(wdw, (By.CSS_SELECTOR, "#flOrdenacaoA"))
-
-        req.preencher_campo(
-            wdw,
-            (By.CSS_SELECTOR, 'input[name="dtInicio"]'),
-            data_inicio,
-        )
-
-        req.preencher_campo(
-            wdw,
-            (By.CSS_SELECTOR, 'input[name="dtFim"]'),
-            data_final,
-        )
-
-        sleep(0.5)
 
         # ── 4. Carrega lista de empresas ─────────────────────────────────────
 
@@ -198,41 +166,91 @@ def extrair_titulo(
 
             sleep(0.5)
 
-            # 5c. Clica em Visualizar
-            req.aguardar_e_clicar(
-                wdw,
-                (By.XPATH, '//input[@type="submit" and @value="Visualizar"]'),
-                "Botão Visualizar",
-            )
+            for ano in range(2022, date.today().year + 1):
 
-            # 5d. Empresa sem dados → fecha alerta e vai para a próxima
-            if verificar_sem_dados(driver, wdw):
-                logger.info("  Sem dados — pulando empresa %s", cod_empresa)
+                ano_atual = date.today().year
+
+                # ── Skip: arquivo já existe e o ano está fechado ─────────────────────
+                nome_final = f"relatorio-{cod_empresa}-{ano}.xlsx"
+                arquivo_final = destino / nome_final
+
+                if arquivo_final.exists():
+                    baixado_hoje = date.fromtimestamp(arquivo_final.stat().st_mtime) == date.today()
+                    ano_fechado = ano < ano_atual
+
+                    if ano_fechado or baixado_hoje:
+                        motivo = "ano fechado" if ano_fechado else "já baixado hoje"
+                        logger.info("  Pulando empresa %s ano %s (%s)", cod_empresa, ano, motivo)
+                        continue
+
+                # ── Datas do filtro ───────────────────────────────────────────────
+                dt_inicio = f"01/01/{ano}"
+                dt_fim = (
+                    date.today().strftime("%d/%m/%Y")  # ano corrente: até hoje
+                    if ano == ano_atual
+                    else f"31/12/{ano}"  # anos fechados: ano inteiro
+                )
+
+                req.preencher_campo(
+                    wdw,
+                    (By.CSS_SELECTOR, 'input[name="dtInicio"]'),
+                    dt_inicio,
+                )
+
+                req.preencher_campo(
+                    wdw,
+                    (By.CSS_SELECTOR, 'input[name="dtFim"]'),
+                    dt_fim,
+                )
+
+                # 5c. Clica em Visualizar
+                req.aguardar_e_clicar(
+                    wdw,
+                    (By.XPATH, '//input[@type="submit" and @value="Visualizar"]'),
+                    "Botão Visualizar",
+                )
+
+
+                sleep(1.5)
+                # 5d. Empresa sem dados → fecha alerta e vai para a próxima
+                if verificar_sem_dados(driver, wdw):
+                    logger.info("Sem dados — empresa %s ano %s", cod_empresa, ano)
+                    driver.switch_to.window(janela_principal)
+                    driver.switch_to.default_content()
+                    driver.switch_to.frame(frame)
+                    continue
+
+                # 5e. Aguarda download com tratamento de falha
+                try:
+                    arquivo_baixado = req.aguardar_download(extensao=".xlsx", timeout=60)
+                except TimeoutError:
+                    logger.warning(
+                        "  Timeout no download — empresa %s ano %s, pulando",
+                        cod_empresa,
+                        ano,
+                    )
+                    # Fecha qualquer aba/popup órfã que o SIENGE possa ter aberto
+                    for handle in driver.window_handles:
+                        if handle != janela_principal:
+                            driver.switch_to.window(handle)
+                            driver.close()
+                    driver.switch_to.window(janela_principal)
+                    driver.switch_to.default_content()
+                    driver.switch_to.frame(frame)
+                    continue
+
+                shutil.move(str(arquivo_baixado), str(arquivo_final))
+                logger.info("  Salvo: %s", arquivo_final)
+
                 driver.switch_to.window(janela_principal)
                 driver.switch_to.default_content()
                 driver.switch_to.frame(frame)
-                continue
-
-            arquivo_baixado = req.aguardar_download(
-                extensao=".xlsx",
-                timeout=240
-            )
-
-            # 5g. Move o arquivo para o destino com nome identificável
-            nome_final = f"relatorio - {cod_empresa}.xlsx"
-            arquivo_final = destino / nome_final
-            shutil.move(str(arquivo_baixado), str(arquivo_final))
-            logger.info("  Salvo: %s", arquivo_final)
-
-            driver.switch_to.window(janela_principal)
-            driver.switch_to.default_content()
-            driver.switch_to.frame(frame)
 
             input_empresa = req.aguardar_e_clicar(
-                wdw,
-                (By.ID, "entity.empresa.cdEmpresaView"),
-                "Campo Empresa",
-            )
+                    wdw,
+                    (By.ID, "entity.empresa.cdEmpresaView"),
+                    "Campo Empresa",
+                )
 
             input_empresa.send_keys(Keys.CONTROL, "a")
             input_empresa.send_keys(Keys.DELETE)

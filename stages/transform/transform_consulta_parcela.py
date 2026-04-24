@@ -174,9 +174,6 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     df = ler_dados((input_dir / "consulta_parcela").glob("*.csv"))
     df = normalizar_colunas(df)
 
-    print(f'Antes de retirar as duplicatas: {df.shape}')
-    # df.drop_duplicates(subset='grupo', inplace=True)
-    print(f'Depois de retirar as duplicatas: {df.shape}')
 
     print(f"  Total de linhas no começo da fato: {len(df):,}")
     print(f"  Total de colunas: {len(df.columns)}")
@@ -307,6 +304,20 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
           f"{(df['banco_cod'] != '').sum():,}")
     print(f"  Registros com PIX preenchido:   "
           f"{(df['pix_chave'] != '').sum():,}")
+
+    # campo de pesquisa
+
+    df["nn_lote_pesquisa"] = np.where(
+        df["nn_lote"].notna(),
+        "nº " + df["nn_lote"].astype(str),
+        ""
+    )
+
+    df["titulo_pesquisa"] = np.where(
+        df["titulo"].notna(),
+        "t " + df["titulo"].astype(str),
+        ""
+    )
 
     # ── 5. Carregar dimensões existentes ──────────────────────────────────────
     print("\n── 5. Carregando dimensões existentes ──────────────────────────────")
@@ -560,6 +571,8 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         "usuario_que_alterou",
         "observacao_do_titulo",
         "descricao_do_pagamento",
+        "titulo_pesquisa",
+        "nn_lote_pesquisa"
 
     ]].copy()
 
