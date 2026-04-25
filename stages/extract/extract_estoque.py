@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+import subprocess
 from datetime import date
 from pathlib import Path
 from time import sleep
@@ -105,7 +106,6 @@ def extrair_estoque(
                 (By.XPATH, f'//li[@role="option" and starts-with(normalize-space(), "{cod_obra} -")]'),
             )
 
-
             req.aguardar_e_clicar(
                 wdw,
                 (By.XPATH, f'//li[@role="option" and starts-with(normalize-space(), "{cod_obra} -")]'),
@@ -113,7 +113,6 @@ def extrair_estoque(
 
             input_obra.send_keys(Keys.CONTROL, "a")
             input_obra.send_keys(Keys.DELETE)
-
 
             sleep(1)
 
@@ -167,8 +166,31 @@ def extrair_estoque(
 
         return arquivo_final
 
+
     finally:
-        driver.quit()
+
+        try:
+
+            driver.quit()
+
+        except Exception:
+
+            pass
+
+        try:
+
+            subprocess.run(
+
+                ["taskkill", "/F", "/IM", "msedge.exe", "/T"],
+
+                capture_output=True,
+
+            )
+
+        except Exception:
+
+            pass
+
         logger.info("Driver encerrado.")
 
 

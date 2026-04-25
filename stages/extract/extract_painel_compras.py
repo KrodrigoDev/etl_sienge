@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+import subprocess
 from datetime import date
 from pathlib import Path
 from time import sleep
@@ -144,8 +145,31 @@ def extrair_painel_compras(
 
         return arquivo_final
 
+
     finally:
-        driver.quit()
+
+        try:
+
+            driver.quit()
+
+        except Exception:
+
+            pass
+
+        try:
+
+            subprocess.run(
+
+                ["taskkill", "/F", "/IM", "msedge.exe", "/T"],
+
+                capture_output=True,
+
+            )
+
+        except Exception:
+
+            pass
+
         logger.info("Driver encerrado.")
 
 

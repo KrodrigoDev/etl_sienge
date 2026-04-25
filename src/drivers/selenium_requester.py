@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+import subprocess
 from time import sleep, time
 
 from selenium import webdriver
@@ -56,21 +57,41 @@ class SeleniumRequester:
     def get_driver(self) -> webdriver.Edge:
         options = Options()
 
+        # ── Perfil ────────────────────────────────────────────────────────────────
         options.add_argument(f"--user-data-dir={self.path_profile}")
         options.add_argument("--profile-directory=Default")
 
-        options.add_argument("--start-maximized")
+        # ── Headless (crítico para Agendador de Tarefas) ──────────────────────────
+        options.add_argument("--headless=new")
+        options.add_argument("--window-size=1920,1080")  # sem isso headless fica 0x0
+        options.add_argument("--disable-gpu")
+        options.add_argument("--disable-software-rasterizer")
 
+        # ── Estabilidade ──────────────────────────────────────────────────────────
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-extensions")
+        options.add_argument("--disable-infobars")
 
+        # ── Downloads ─────────────────────────────────────────────────────────────
         options.add_experimental_option("prefs", {
             "download.default_directory": str(self.download_dir),
             "download.prompt_for_download": False,
             "download.directory_upgrade": True,
             "safebrowsing.enabled": True,
         })
+
         driver = webdriver.Edge(options=options)
+
+        # Headless não herda permissão de download — precisa setar via CDP
+        driver.execute_cdp_cmd(
+            "Browser.setDownloadBehavior",
+            {
+                "behavior": "allow",
+                "downloadPath": str(self.download_dir),
+            },
+        )
+
         logger.info("Driver Edge iniciado → downloads em %s", self.download_dir)
         return driver
 
@@ -116,7 +137,7 @@ class SeleniumRequester:
             aviso = SeleniumRequester.aguardar_presenca(wdw, (By.CSS_SELECTOR, '.spwAlertaAviso'))
 
             if aviso:
-               driver.get(f"{BASE_URL}/removerUsuarioLogadoServlet?acao=S")
+                driver.get(f"{BASE_URL}/removerUsuarioLogadoServlet?acao=S")
 
         except TimeoutException:
             logger.debug("Alerta não apareceu — fluxo normal.")
@@ -280,7 +301,6 @@ class SeleniumRequester:
             '//button[normalize-space()="Redefinir"]'
         )
 
-
         # 1. Abre o menu
         SeleniumRequester.aguardar_e_clicar(wdw, locator_colunas)
         sleep(1)
@@ -385,3 +405,82 @@ class SeleniumRequester:
             logger.info("Popup de novidade fechado.")
         except TimeoutException:
             logger.debug("Nenhum popup de novidade detectado — seguindo.")
+
+    def reiniciar_driver(self, driver, url_navegacao):
+        """
+        Encerra o driver atual com segurança e sobe um novo, já navegado.
+
+        Deve ser utilizado principalmente na extração dos
+        adiantamentos e títulos, porque baixam n arquivos
+
+        driver:
+
+        """
+        try:
+            driver.quit()
+        except Exception:
+            pass
+
+        subprocess.run(
+            ["taskkill", "/F", "/IM", "msedge.exe", "/T"],
+            capture_output=True,
+        )
+        sleep(5)
+
+        novo_driver = self.get_driver()
+        novo_wdw = self.waiter(novo_driver)
+        self.navegacao_inicial(novo_driver, novo_wdw)
+        novo_driver.get(url_navegacao)
+
+        return novo_driver, novo_wdw
+
+    # em selenium_requester.py, adicionar como método estático da classe
+
+    @staticmethod
+    def verificar_sem_dados(driver, wdw) -> bool:
+        """
+        Retorna True se a empresa não tem dados e trata o aviso adequadamente.
+        Retorna False se há dados para baixar.
+
+        O SIENGE usa dois mecanismos distintos de "sem dados":
+          1. Alert nativo do browser (window.alert) — "Nenhum registro encontrado."
+             Aparece antes de qualquer interação com o DOM e trava todo find_element.
+             Deve ser tratado PRIMEIRO via driver.switch_to.alert.
+          2. div.spwAlertaAviso — alerta visual dentro da página ("Não há registros").
+             Tratado normalmente via CSS selector.
+        """
+        sleep(0.2)
+
+        try:
+            alert = driver.switch_to.alert
+            texto_alert = alert.text
+            logger.info("Alert nativo detectado: '%s' — aceitando", texto_alert)
+            alert.accept()
+            return True
+        except Exception:
+            pass
+
+        try:
+            alerta = wdw.until(
+                lambda d: d.find_element(By.CSS_SELECTOR, "div.spwAlertaAviso")
+            )
+            try:
+                texto = alerta.text
+            except EC.StaleElementReferenceException:
+                logger.info("Alerta ficou stale — tratando como sem dados")
+                texto = "Não há registros"
+
+            if "Não há registros" in texto:
+                logger.info("Empresa sem dados (div alerta) — fechando")
+                try:
+                    driver.find_element(
+                        By.CSS_SELECTOR, 'img[name="fecharAlertas"]'
+                    ).click()
+                except Exception:
+                    logger.warning("Não conseguiu clicar no fechar — ignorando")
+                return True
+
+        except TimeoutException:
+            return False
+
+        return False

@@ -1,23 +1,14 @@
 """
-stages/extract/extract_adiantamento.py
+stages/extract/extract_titulo.py
 ----------------------------------
-Extrai o relatório de Adiantamento do SIENGE e salva como XLSX.
-
-Fluxo:
-  1. Login via sessão salva
-  2. Navega para o relatório de Adiantamento
-  3. Aplica filtros necessários (cod_empresa, data)
-  4. Exporta XLSX
-  5. Aguarda download, fecha a aba de loading e move para pasta de destino
-
-Reutiliza integralmente o SeleniumRequester e seus helpers —
-nenhuma lógica de browser é duplicada aqui.
+Extrai o relatório de Títulos do SIENGE e salva como XLSX.
 """
 
 from __future__ import annotations
 
 import logging
 import shutil
+import subprocess
 from datetime import date
 from pathlib import Path
 from time import sleep
@@ -27,71 +18,15 @@ import pandas as pd
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import (
-    TimeoutException,
-    StaleElementReferenceException,
+    InvalidSessionIdException,
+    WebDriverException,
 )
 
 from src.drivers.selenium_requester import BASE_URL, SeleniumRequester
 
 logger = logging.getLogger(__name__)
 
-URL_ADIANTAMENTO = f"{BASE_URL}/8/index.html#/common/page/373"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# HELPERS
-# ─────────────────────────────────────────────────────────────────────────────
-
-def verificar_sem_dados(driver, wdw) -> bool:
-    """
-    Retorna True se a empresa não tem dados e trata o aviso adequadamente.
-    Retorna False se há dados para baixar.
-
-    O SIENGE usa dois mecanismos distintos de "sem dados":
-      1. Alert nativo do browser (window.alert) — "Nenhum registro encontrado."
-         Aparece antes de qualquer interação com o DOM e trava todo find_element.
-         Deve ser tratado PRIMEIRO via driver.switch_to.alert.
-      2. div.spwAlertaAviso — alerta visual dentro da página ("Não há registros").
-         Tratado normalmente via CSS selector.
-    """
-    sleep(0.2)
-
-    # ── Tipo 1: alert nativo do browser ──────────────────────────────────────
-    try:
-        alert = driver.switch_to.alert
-        texto_alert = alert.text
-        logger.info("Alert nativo detectado: '%s' — aceitando", texto_alert)
-        alert.accept()
-        return True
-    except Exception:
-        pass  # Nenhum alert nativo presente — segue para verificar o DOM
-
-    # ── Tipo 2: div.spwAlertaAviso (alerta visual na página) ─────────────────
-    try:
-        alerta = wdw.until(
-            lambda d: d.find_element(By.CSS_SELECTOR, "div.spwAlertaAviso")
-        )
-        try:
-            texto = alerta.text
-        except StaleElementReferenceException:
-            logger.info("Alerta ficou stale — tratando como sem dados")
-            texto = "Não há registros"
-
-        if "Não há registros" in texto:
-            logger.info("Empresa sem dados (div alerta) — fechando")
-            try:
-                driver.find_element(
-                    By.CSS_SELECTOR, 'img[name="fecharAlertas"]'
-                ).click()
-            except Exception:
-                logger.warning("Não conseguiu clicar no fechar — ignorando")
-            return True
-
-    except TimeoutException:
-        return False
-
-    return False
-
+URL_TITULO = f"{BASE_URL}/8/index.html#/common/page/373"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -102,10 +37,7 @@ def extrair_titulo(
         destino: Path | None = None,
 ) -> None:
     """
-    Executa a extração do relatório de titulos empresa a empresa pelos anos de emissão.
-
-    Parâmetros
-    ----------
+    Executa a extração do relatório de títulos empresa a empresa pelos anos de emissão.
     """
 
     req = SeleniumRequester()
@@ -123,20 +55,18 @@ def extrair_titulo(
 
         # ── 2. Navega para o relatório ───────────────────────────────────────
         logger.info("Navegando para o relatório de títulos...")
-        driver.get(URL_ADIANTAMENTO)
+        driver.get(URL_TITULO)
         sleep(2)
 
         req.fechar_popup_novidade(wdw)
 
-        # ── 3. Entra no iframe e preenche filtros fixos ──────────────────────
+        # ── 3. Entra no iframe ───────────────────────────────────────────────
         logger.info("Entrando no iframe do formulário")
         driver.switch_to.default_content()
         frame = driver.find_element(By.ID, "iFramePage")
         driver.switch_to.frame(frame)
 
-
         # ── 4. Carrega lista de empresas ─────────────────────────────────────
-
         dim_empresas = pd.read_csv(
             req.project_root / "stages/transform/output/fato_consulta_parcela.csv",
             sep=";",
@@ -154,109 +84,142 @@ def extrair_titulo(
         for cod_empresa in lista_empresas:
             logger.info("Empresa: %s", cod_empresa)
 
-            # 5b. Digita o código e aciona a busca
-            input_empresa = req.aguardar_e_clicar(
-                wdw,
-                (By.ID, "entity.empresa.cdEmpresaView"),
-                "Campo Empresa",
-            )
+            try:  # ── proteção por empresa ────────────────────────────────────
 
-            input_empresa.send_keys(cod_empresa)
-            input_empresa.send_keys(Keys.ENTER)
-
-            sleep(0.5)
-
-            for ano in range(2022, date.today().year + 1):
-
-                ano_atual = date.today().year
-
-                # ── Skip: arquivo já existe e o ano está fechado ─────────────────────
-                nome_final = f"relatorio-{cod_empresa}-{ano}.xlsx"
-                arquivo_final = destino / nome_final
-
-                if arquivo_final.exists():
-                    baixado_hoje = date.fromtimestamp(arquivo_final.stat().st_mtime) == date.today()
-                    ano_fechado = ano < ano_atual
-
-                    if ano_fechado or baixado_hoje:
-                        motivo = "ano fechado" if ano_fechado else "já baixado hoje"
-                        logger.info("  Pulando empresa %s ano %s (%s)", cod_empresa, ano, motivo)
-                        continue
-
-                # ── Datas do filtro ───────────────────────────────────────────────
-                dt_inicio = f"01/01/{ano}"
-                dt_fim = (
-                    date.today().strftime("%d/%m/%Y")  # ano corrente: até hoje
-                    if ano == ano_atual
-                    else f"31/12/{ano}"  # anos fechados: ano inteiro
-                )
-
-                req.preencher_campo(
-                    wdw,
-                    (By.CSS_SELECTOR, 'input[name="dtInicio"]'),
-                    dt_inicio,
-                )
-
-                req.preencher_campo(
-                    wdw,
-                    (By.CSS_SELECTOR, 'input[name="dtFim"]'),
-                    dt_fim,
-                )
-
-                # 5c. Clica em Visualizar
-                req.aguardar_e_clicar(
-                    wdw,
-                    (By.XPATH, '//input[@type="submit" and @value="Visualizar"]'),
-                    "Botão Visualizar",
-                )
-
-
-                sleep(1.5)
-                # 5d. Empresa sem dados → fecha alerta e vai para a próxima
-                if verificar_sem_dados(driver, wdw):
-                    logger.info("Sem dados — empresa %s ano %s", cod_empresa, ano)
-                    driver.switch_to.window(janela_principal)
-                    driver.switch_to.default_content()
-                    driver.switch_to.frame(frame)
-                    continue
-
-                # 5e. Aguarda download com tratamento de falha
-                try:
-                    arquivo_baixado = req.aguardar_download(extensao=".xlsx", timeout=60)
-                except TimeoutError:
-                    logger.warning(
-                        "  Timeout no download — empresa %s ano %s, pulando",
-                        cod_empresa,
-                        ano,
-                    )
-                    # Fecha qualquer aba/popup órfã que o SIENGE possa ter aberto
-                    for handle in driver.window_handles:
-                        if handle != janela_principal:
-                            driver.switch_to.window(handle)
-                            driver.close()
-                    driver.switch_to.window(janela_principal)
-                    driver.switch_to.default_content()
-                    driver.switch_to.frame(frame)
-                    continue
-
-                shutil.move(str(arquivo_baixado), str(arquivo_final))
-                logger.info("  Salvo: %s", arquivo_final)
-
-                driver.switch_to.window(janela_principal)
-                driver.switch_to.default_content()
-                driver.switch_to.frame(frame)
-
-            input_empresa = req.aguardar_e_clicar(
+                input_empresa = req.aguardar_e_clicar(
                     wdw,
                     (By.ID, "entity.empresa.cdEmpresaView"),
                     "Campo Empresa",
                 )
+                input_empresa.send_keys(cod_empresa)
+                input_empresa.send_keys(Keys.ENTER)
+                sleep(0.5)
 
-            input_empresa.send_keys(Keys.CONTROL, "a")
-            input_empresa.send_keys(Keys.DELETE)
+                for ano in range(2022, date.today().year + 1):
+                    ano_atual = date.today().year
+
+                    # ── Skip ─────────────────────────────────────────────────
+                    nome_final = f"relatorio-{cod_empresa}-{ano}.xlsx"
+                    arquivo_final = destino / nome_final
+
+                    if arquivo_final.exists():
+                        baixado_hoje = (
+                                date.fromtimestamp(arquivo_final.stat().st_mtime)
+                                == date.today()
+                        )
+                        ano_fechado = ano < ano_atual
+                        if ano_fechado or baixado_hoje:
+                            motivo = "ano fechado" if ano_fechado else "já baixado hoje"
+                            logger.info(
+                                "  Pulando empresa %s ano %s (%s)",
+                                cod_empresa, ano, motivo,
+                            )
+                            continue
+
+                    # ── Datas do filtro ───────────────────────────────────────
+                    dt_inicio = f"01/01/{ano}"
+                    dt_fim = (
+                        date.today().strftime("%d/%m/%Y")
+                        if ano == ano_atual
+                        else f"31/12/{ano}"
+                    )
+
+                    req.preencher_campo(
+                        wdw,
+                        (By.CSS_SELECTOR, 'input[name="dtInicio"]'),
+                        dt_inicio,
+                    )
+                    req.preencher_campo(
+                        wdw,
+                        (By.CSS_SELECTOR, 'input[name="dtFim"]'),
+                        dt_fim,
+                    )
+
+                    req.aguardar_e_clicar(
+                        wdw,
+                        (By.XPATH, '//input[@type="submit" and @value="Visualizar"]'),
+                        "Botão Visualizar",
+                    )
+
+                    sleep(1.5)
+
+                    # ── Sem dados ─────────────────────────────────────────────
+                    if req.verificar_sem_dados(driver, wdw):
+                        logger.info("Sem dados — empresa %s ano %s", cod_empresa, ano)
+                        driver.switch_to.window(janela_principal)
+                        driver.switch_to.default_content()
+                        driver.switch_to.frame(frame)
+                        continue
+
+                    # ── Download ──────────────────────────────────────────────
+                    try:
+                        arquivo_baixado = req.aguardar_download(
+                            extensao=".xlsx", timeout=240
+                        )
+                    except TimeoutError:
+                        logger.warning(
+                            "  Timeout no download — empresa %s ano %s, pulando",
+                            cod_empresa, ano,
+                        )
+                        driver.switch_to.window(janela_principal)
+                        driver.switch_to.default_content()
+                        driver.switch_to.frame(frame)
+                        continue
+
+                    shutil.move(str(arquivo_baixado), str(arquivo_final))
+                    logger.info("  Salvo: %s", arquivo_final)
+
+                    driver.switch_to.window(janela_principal)
+                    driver.switch_to.default_content()
+                    driver.switch_to.frame(frame)
+
+                # ── Limpa campo empresa ───────────────────────────────────────
+                input_empresa = req.aguardar_e_clicar(
+                    wdw,
+                    (By.ID, "entity.empresa.cdEmpresaView"),
+                    "Campo Empresa",
+                )
+                input_empresa.send_keys(Keys.CONTROL, "a")
+                input_empresa.send_keys(Keys.DELETE)
+
+            except (InvalidSessionIdException, WebDriverException) as e_sessao:
+                # ── Sessão corrompida — reinicia driver e segue ───────────────
+                logger.warning(
+                    "Sessão corrompida na empresa %s — reiniciando driver: %s",
+                    cod_empresa, e_sessao,
+                )
+
+                driver, wdw = req.reiniciar_driver(driver, URL_TITULO)
+
+                driver.switch_to.default_content()
+                frame = driver.find_element(By.ID, "iFramePage")
+                driver.switch_to.frame(frame)
+                janela_principal = driver.current_window_handle
+
+                sleep(2)
+
+                logger.info(
+                    "Driver reiniciado — arquivos pendentes da empresa %s "
+                    "serão recuperados no próximo run.",
+                    cod_empresa,
+                )
+                continue
 
     finally:
-        driver.quit()
+        try:
+            driver.quit()
+        except Exception:
+            pass
+
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/IM", "msedge.exe", "/T"],
+                capture_output=True,
+            )
+            logger.info("Processos msedge encerrados via taskkill.")
+        except Exception as e_kill:
+            logger.warning("taskkill falhou: %s", e_kill)
+
         logger.info("Driver encerrado.")
 
 

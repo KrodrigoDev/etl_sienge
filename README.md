@@ -1,121 +1,156 @@
-# ETL Suprimentos — SIENGE
+# ETL SIENGE → Power BI
 
-Pipeline de extração, transformação e carga dos dados de suprimentos do SIENGE para o Power BI.
+Pipeline de extração e transformação dos dados do SIENGE para consumo no Power BI.
 
----
-
-## Estrutura do Projeto
-
-```
-etl_sienge/
-│
-├── main.py                          ← orquestrador (extract → transform → load)
-│
-├── src/
-│   └── drivers/
-│       └── selenium_requester.py   ← driver Edge + helpers genéricos reutilizados por todos os extractors
-│
-└── stages/
-    ├── extract/
-    │   ├── reference/
-    │   │   ├── dim_empresa.csv        ← lista de empresas para o loop do adiantamento
-    │   │   └── obras_estoque.csv      ← lista de obras para o filtro do estoque
-    │   │
-    │   ├── extract_painel_compras.py  ← extrai painel de compras
-    │   ├── extract_estoque.py         ← extrai estoque de obras
-    │   ├── extract_servico.py         ← extrai solicitações de serviços
-    │   ├── extract_contrato.py        ← extrai contratos
-    │   └── extract_adiantamento.py   ← extrai adiantamentos (loop por empresa, download XLSX)
-    │
-    ├── transform/
-    │   ├── input/                     ← arquivos brutos (saída do extract)
-    │   │   ├── painel_compras/
-    │   │   ├── estoque/
-    │   │   ├── servico/
-    │   │   ├── contrato/
-    │   │   └── adiantamento/
-    │   │
-    │   ├── output/                    ← tabelas do DW (entrada do Power BI)
-    │   │
-    │   ├── transform_painel_compras.py  ← gera dims base + fato_solicitacao_item
-    │   ├── transform_estoque.py         ← expande dims + gera fato_estoque
-    │   ├── transform_servico.py         ← gera fato_servico
-    │   ├── transform_contratos.py       ← gera fato_contrato
-    │   └── transform_adiantamento.py   ← parse hierárquico + gera fato_adiantamento
-    │
-    └── load/
-        └── (próxima etapa)
-```
+> Compatível com **SIENGE versão 9.0.4-5 (build 4399)**. Usuários de outras versões podem enfrentar incompatibilidades nos seletores CSS/XPath.
 
 ---
 
 ## Fluxo do Pipeline
 
-```
-extract_painel_compras  ─┐
-extract_estoque         ─┤
-extract_servico         ─┼─► transform_painel_compras  (dims base)
-extract_contrato        ─┤       ↓
-extract_adiantamento    ─┘   transform_estoque
-                             transform_servico          (dependem das dims base)
-                             transform_contrato
-                             transform_adiantamento
-                                 ↓
-                             output/ → Power BI
+```mermaid
+---
+config:
+  layout: elk
+---
+flowchart LR
+    Driver[SeleniumRequester]
+
+    subgraph EXTRACT
+        E1[painel_compras]
+        E2[estoque]
+        E3[servico]
+        E4[contrato]
+        E5[adiantamento]
+        E6[consulta_parcela]
+        E7[titulo]
+    end
+
+    subgraph TRANSFORM
+        T1[painel_compras *]
+        T2[estoque]
+        T3[servico]
+        T4[contrato]
+        T5[adiantamento]
+        T6[consulta_parcela]
+        T7[titulo]
+    end
+
+    OUTPUT[output/ > Power BI]
+
+    Driver -.-> EXTRACT
+    EXTRACT --> TRANSFORM
+    T1 --> T2
+    T1 --> T3
+    T1 --> T4
+    T1 --> T5
+    TRANSFORM --> OUTPUT
 ```
 
-> **Atenção:** `transform_painel_compras` deve sempre rodar primeiro — ele gera
-> `dim_obra`, `dim_insumo` e `dim_grupo_insumo` que os demais transforms dependem.
+> **\*** `transform_painel_compras` deve rodar primeiro — gera `dim_obra`, `dim_insumo` e `dim_grupo_insumo` que os demais transforms consomem.
+
+> **Nota:** A etapa de Load atualmente entrega os dados via arquivos CSV em `output/`. A migração para banco de dados relacional está planejada para uma próxima fase.
+
+---
+
+## Estrutura
+
+```
+etl_sienge/
+│
+├── main.py                            ← orquestrador do pipeline
+├── logs/                              ← logs de execução por painel
+│
+├── src/
+│   └── drivers/
+│       └── selenium_requester.py      ← driver Edge + helpers reutilizáveis
+│
+└── stages/
+    ├── extract/
+    │   ├── reference/
+    │   │   ├── dim_empresa.csv        ← empresas para loop do adiantamento/título
+    │   │   └── obras_estoque.csv      ← obras para filtro do estoque
+    │   │
+    │   ├── extract_painel_compras.py
+    │   ├── extract_estoque.py
+    │   ├── extract_servico.py
+    │   ├── extract_contrato.py
+    │   ├── extract_adiantamento.py
+    │   ├── extract_consulta_parcela.py
+    │   └── extract_titulo.py
+    │
+    └── transform/
+        ├── input/                     ← arquivos brutos (saída do extract)
+        └── output/                    ← tabelas prontas para o Power BI
+```
+
+---
+
+## Paineis e Agendamento
+
+O pipeline está dividido em dois paineis independentes, cada um com seu próprio `.bat` para agendamento no Windows Task Scheduler:
+
+| Painel | Bat | Etapas |
+|---|---|---|
+| Financeiro | `consultas_execucao.bat` | consulta_parcela + titulo |
+| Suprimentos | `suprimentos_execucao.bat` | painel_compras + estoque + servico + contrato + adiantamento |
+
+Logs gerados em `logs/consultas_execucao.log` e `logs/suprimentos_execucao.log`.
 
 ---
 
 ## Uso
 
 ```bash
-# Pipeline completo (extract + transform)
-python main.py
+# Painel completo
+python main.py --etapa painel_consultas
+python main.py --etapa painel_suprimentos
 
-# Só extração (todos os módulos em ordem)
-python main.py --etapa extract
-
-# Só transformação (usa arquivos já baixados)
-python main.py --etapa transform
-
-# Módulo individual — extract
+# Etapas individuais — extract
 python main.py --etapa extract_painel_compras
 python main.py --etapa extract_estoque
 python main.py --etapa extract_servico
 python main.py --etapa extract_contrato
 python main.py --etapa extract_adiantamento
+python main.py --etapa extract_consulta_parcela
+python main.py --etapa extract_titulo
 
-# Módulo individual — transform
+# Etapas individuais — transform
 python main.py --etapa transform_painel_compras
 python main.py --etapa transform_estoque
 python main.py --etapa transform_servico
 python main.py --etapa transform_contrato
 python main.py --etapa transform_adiantamento
+python main.py --etapa transform_consulta_parcela
+python main.py --etapa transform_titulo
 
-# Data de início customizada (padrão: 01/01/ano_atual)
-python main.py --data-inicio 01/01/2024
+# Data de início customizada
+python main.py --etapa extract_painel_compras --data-inicio 01/01/2024
 ```
 
 ---
 
-## Detalhes por Módulo
+## Resiliência
 
-### extract_adiantamento
-- Itera sobre todas as empresas de `dim_empresa.csv`
-- Para cada empresa, clica em **Visualizar**, detecta a nova aba de download e move o XLSX para `input/adiantamento/`
-- Trata dois tipos de "sem dados": alert nativo do browser e `div.spwAlertaAviso`
-- Arquivos gerados: `relatorio - {cod_empresa}.xlsx`
+- Cada etapa executa com **retry automático** (2 tentativas, 30s de intervalo)
+- Extractors com loop por empresa (`titulo`, `adiantamento`) reiniciam o driver isoladamente em caso de sessão corrompida, sem perder o progresso das empresas já processadas
+- Arquivos já baixados são pulados automaticamente no rerun
 
-### transform_adiantamento
-- Parse hierárquico: propaga `empresa`, `credor` e `documento_vinculado` por estado linha a linha
-- Colunas finais: `empresa_cod`, `empresa`, `cod_credor`, `credor`, `documento_vinculado`, `data`, `vencto`, `documento`, `tipo_do_mov`, `vl_movimento`, `saldo`, `observacao`, `nome_arquivo`
-- Saída: `fato_adiantamento.csv`
+---
 
-### selenium_requester
-Helpers genéricos reutilizados por todos os extractors:
+## Pré-requisitos
+
+- Python 3.12+
+- Microsoft Edge + EdgeDriver compatível
+- Perfil Edge com sessão do SIENGE salva em `C:\SeleniumPerfil\Edge`
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+## Helpers — SeleniumRequester
 
 | Método | Descrição |
 |---|---|
@@ -126,30 +161,15 @@ Helpers genéricos reutilizados por todos os extractors:
 | `exportar_csv_modal` | Sequência padrão do modal de exportação |
 | `selecionar_todas_colunas` | Abre seletor de colunas MUI e marca todas |
 | `aguardar_carregamento_tabela` | Aguarda spinner do MuiDataGrid sumir |
-| `fechar_popup_novidade` | Fecha o MuiDialog de "novidade" do SIENGE quando presente |
-| `scrollar_pagina` | Scroll no container principal para revelar elementos |
+| `fechar_popup_novidade` | Fecha o MuiDialog de novidade quando presente |
+| `verificar_sem_dados` | Detecta ausência de dados (alert nativo ou div alerta) |
+| `reiniciar_driver` | Encerra driver corrompido e sobe um novo já navegado |
+| `scrollar_pagina` | Scroll no container principal |
 
 ---
 
-## Pré-requisitos
+## Contribuindo
 
-- Python 3.12+
-- Microsoft Edge + EdgeDriver compatível
-- Perfil Edge com sessão do SIENGE salva em `C:\SeleniumPerfil\Edge`
-- Dependências: `selenium`, `pandas`, `openpyxl`
+Melhorias e correções são bem-vindas. Abra uma issue ou envie um PR.
 
-```bash
-pip install -r requirements.txt
-```
-
----
-
-## Logs
-
-Toda execução gera log simultâneo no terminal e em `pipeline.log` na raiz do projeto.
-
-```
-2026-04-18 10:20:17 [INFO] ═══ EXTRACT — painel_compras ══...
-2026-04-18 10:21:01 [INFO] ▶ Empresa: 46
-2026-04-18 10:21:03 [INFO]   Salvo: input/adiantamento/relatorio - 46.xlsx
-```
+Lembrando que o pipeline foi desenvolvido e testado exclusivamente no **SIENGE versão 9.0.4-5 (build 4399)** — mudanças na estrutura do HTML/CSS do SIENGE em outras versões podem quebrar os seletores sem aviso prévio.

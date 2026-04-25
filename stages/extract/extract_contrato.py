@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+import subprocess
 from datetime import date
 from pathlib import Path
 from time import sleep
@@ -96,7 +97,6 @@ def extrair_contratos(
         )
         sleep(1)
 
-
         # ── 5. Consultar ──────────────────────────────────────────────────────
         logger.info("Consultando...")
         req.aguardar_e_clicar(
@@ -143,8 +143,31 @@ def extrair_contratos(
 
         return arquivo_final
 
+
     finally:
-        driver.quit()
+
+        try:
+
+            driver.quit()
+
+        except Exception:
+
+            pass
+
+        try:
+
+            subprocess.run(
+
+                ["taskkill", "/F", "/IM", "msedge.exe", "/T"],
+
+                capture_output=True,
+
+            )
+
+        except Exception:
+
+            pass
+
         logger.info("Driver encerrado.")
 
 

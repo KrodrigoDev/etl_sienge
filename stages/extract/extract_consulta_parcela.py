@@ -91,7 +91,7 @@ def extrair_consulta_parcela(
             wdw,
             (By.XPATH, '//div[contains(@class,"MuiTablePagination-select")]'),
         )
-        sleep(10)
+        sleep(2)
 
         # ── 6. Seleciona '5000' linhas por página ─────────────────────────────
         logger.info("Selecionando 5000 linhas por página...")
@@ -103,7 +103,7 @@ def extrair_consulta_parcela(
             )
         )
         select_paginacao.click()
-        sleep(1)
+        sleep(2)
 
         # Aguarda o <li> aparecer no DOM e estar clicável
         # role="option" evita pegar outros <li> que contenham "5000" em outro contexto
@@ -113,7 +113,7 @@ def extrair_consulta_parcela(
             )
         )
         opcao_5000.click()
-        sleep(2)
+        sleep(3)
 
         req.aguardar_carregamento_tabela(driver)
 
@@ -154,8 +154,8 @@ def extrair_consulta_parcela(
             logger.info("Avançando para a página %d...", pagina + 1)
             driver.execute_script("arguments[0].click();", btn_proxima)
             pagina += 1
-            sleep(1.5)
             req.aguardar_carregamento_tabela(driver)
+            sleep(3)
 
     finally:
 

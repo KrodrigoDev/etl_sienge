@@ -1,41 +1,8 @@
 """
 main.py
 --------
-Orquestrador do pipeline ETL de Suprimentos.
-
-Etapas de extração (ordem obrigatória):
-  1. painel_compras
-  2. estoque
-  3. servico
-  4. contrato
-  5. adiantamento
-  6. consulta_parcela
-  7. titulo (Se atentar porque ela depende do fato_consulta_parcela)
-
-Etapas de transformação (após extract):
-  → transform_painel_compras  (roda primeiro — gera as dims base)
-  → transform_estoque         (requer dims do painel_compras)
-  → transform_servico
-  → transform_contrato
-  → transform_adiantamento
-  → transform_consulta_parcela
-  → transform_titulo
-
-Uso:
-    python main.py                                # extrai tudo + transforma tudo
-    python main.py --etapa extract                # só extração (todos os módulos)
-    python main.py --etapa transform              # só transformação (todos os módulos)
-    python main.py --etapa extract_painel_compras # extração individual
-    python main.py --etapa extract_estoque
-    python main.py --etapa extract_servico
-    python main.py --etapa extract_contrato
-    python main.py --etapa extract_adiantamento
-    python main.py --etapa transform_painel_compras
-    python main.py --etapa transform_estoque
-    python main.py --etapa transform_servico
-    python main.py --etapa transform_contrato
-    python main.py --etapa transform_adiantamento
-    python main.py --data-inicio 01/01/2025       # data de início customizada
+Orquestrador do pipeline.
+...
 """
 
 from __future__ import annotations
@@ -43,19 +10,12 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import time
 from datetime import date
 from pathlib import Path
 
-# ── Logging ───────────────────────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler("pipeline.log", encoding="utf-8"),
-    ],
-)
-logger = logging.getLogger(__name__)
+sys.stdout.reconfigure(encoding="utf-8")
+sys.stderr.reconfigure(encoding="utf-8")
 
 # ── Caminhos ──────────────────────────────────────────────────────────────────
 ROOT = Path(__file__).resolve().parent
@@ -64,16 +24,24 @@ INPUT_DIR = ROOT / "stages" / "transform" / "input"
 REFERENCE_DIR = ROOT / "stages" / "transform" / "input" / "reference"
 OUTPUT_DIR = ROOT / "stages" / "transform" / "output"
 
-# Dims base geradas pelo transform_painel_compras, exigidas pelos demais
 _DIMS_BASE = ["dim_obra.csv", "dim_insumo.csv", "dim_grupo_insumo.csv"]
 
+# ── Logging ───────────────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler(ROOT / "logs" / "pipeline.log", encoding="utf-8"),
+    ],
+)
+logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _checar_dims_base() -> None:
-    """Garante que as dims base existam antes de rodar transforms dependentes."""
     ausentes = [d for d in _DIMS_BASE if not (OUTPUT_DIR / d).exists()]
     if ausentes:
         raise FileNotFoundError(
@@ -86,6 +54,54 @@ def _secao(nome: str) -> None:
     logger.info("═══ %s %s", nome, "═" * max(0, 50 - len(nome)))
 
 
+def _com_retry(
+        nome: str,
+        fn,
+        tentativas: int = 2,
+        espera: int = 30,
+) -> bool:
+    """
+    Executa fn() até `tentativas` vezes em caso de falha.
+
+    Parâmetros
+    ----------
+    nome      : nome da etapa para log
+    fn        : callable sem argumentos (use lambda ou partial)
+    tentativas: número máximo de execuções (padrão 2)
+    espera    : segundos entre tentativas (padrão 20)
+
+    Retorna
+    -------
+    True  → etapa concluída com sucesso
+    False → todas as tentativas falharam (pipeline continua)
+    """
+    for tentativa in range(1, tentativas + 1):
+        try:
+            logger.info(
+                "Iniciando '%s' — tentativa %d/%d", nome, tentativa, tentativas
+            )
+            fn()
+            logger.info("'%s' concluído com sucesso.", nome)
+            return True
+        except Exception as exc:
+            logger.warning(
+                "'%s' falhou na tentativa %d/%d — %s: %s",
+                nome, tentativa, tentativas, type(exc).__name__, exc,
+            )
+            if tentativa < tentativas:
+                logger.info(
+                    "Aguardando %ds antes de nova tentativa de '%s'...",
+                    espera, nome,
+                )
+                time.sleep(espera)
+
+    logger.error(
+        "'%s' falhou em todas as %d tentativas — continuando pipeline.",
+        nome, tentativas,
+    )
+    return False
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # EXTRACT
 # ─────────────────────────────────────────────────────────────────────────────
@@ -94,79 +110,90 @@ def etapa_extract_painel_compras(data_inicio: str) -> None:
     from stages.extract.extract_painel_compras import extrair_painel_compras
 
     _secao("EXTRACT — painel_compras")
-    caminho = extrair_painel_compras(
-        data_inicio=data_inicio,
-        destino=INPUT_DIR / "painel_compras",
+    _com_retry(
+        nome="extract_painel_compras",
+        fn=lambda: extrair_painel_compras(
+            data_inicio=data_inicio,
+            destino=INPUT_DIR / "painel_compras",
+        ),
     )
-    logger.info("Painel de compras salvo em: %s", caminho)
 
 
 def etapa_extract_estoque() -> None:
     from stages.extract.extract_estoque import extrair_estoque
 
     _secao("EXTRACT — estoque")
-    caminho = extrair_estoque(destino=INPUT_DIR / "estoque")
-    logger.info("Estoque salvo em: %s", caminho)
+    _com_retry(
+        nome="extract_estoque",
+        fn=lambda: extrair_estoque(destino=INPUT_DIR / "estoque"),
+    )
 
 
 def etapa_extract_servico(data_inicio: str) -> None:
     from stages.extract.extract_servico import extrair_servicos
 
     _secao("EXTRACT — servico")
-    caminho = extrair_servicos(
-        data_inicio=data_inicio,
-        destino=INPUT_DIR / "servico",
+    _com_retry(
+        nome="extract_servico",
+        fn=lambda: extrair_servicos(
+            data_inicio=data_inicio,
+            destino=INPUT_DIR / "servico",
+        ),
     )
-    logger.info("Serviços salvo em: %s", caminho)
 
 
 def etapa_extract_contrato(data_inicio: str) -> None:
     from stages.extract.extract_contrato import extrair_contratos
 
     _secao("EXTRACT — contrato")
-    caminho = extrair_contratos(
-        data_inicio=data_inicio,
-        destino=INPUT_DIR / "contrato",
+    _com_retry(
+        nome="extract_contrato",
+        fn=lambda: extrair_contratos(
+            data_inicio=data_inicio,
+            destino=INPUT_DIR / "contrato",
+        ),
     )
-    logger.info("Contratos salvo em: %s", caminho)
 
 
 def etapa_extract_adiantamento(data_inicio: str) -> None:
     from stages.extract.extract_adiantamento import extrair_adiantamento
 
     _secao("EXTRACT — adiantamento")
-    extrair_adiantamento(
-        data_inicio=data_inicio,
-        destino=INPUT_DIR / "adiantamento",
+    _com_retry(
+        nome="extract_adiantamento",
+        fn=lambda: extrair_adiantamento(
+            data_inicio=data_inicio,
+            destino=INPUT_DIR / "adiantamento",
+        ),
     )
-    logger.info("Adiantamento extraído.")
+
 
 def etapa_extract_consulta_parcela(data_inicio: str) -> None:
     from stages.extract.extract_consulta_parcela import extrair_consulta_parcela
 
     _secao("EXTRACT — Consulta Parcela")
-    extrair_consulta_parcela(
-        data_inicio=data_inicio,
-        destino=INPUT_DIR / "consulta_parcela",
+    _com_retry(
+        nome="extract_consulta_parcela",
+        fn=lambda: extrair_consulta_parcela(
+            data_inicio=data_inicio,
+            destino=INPUT_DIR / "consulta_parcela",
+        ),
     )
-    logger.info("Consulta Parcela extraído.")
 
 
 def etapa_extract_titulo() -> None:
     from stages.extract.extract_titulo import extrair_titulo
 
     _secao("EXTRACT — Título")
-    extrair_titulo(
-        destino=INPUT_DIR / "titulo",
+    _com_retry(
+        nome="extract_titulo",
+        fn=lambda: extrair_titulo(destino=INPUT_DIR / "titulo"),
     )
-    logger.info("Consulta Título extraído.")
 
 
 def etapa_extract(data_inicio: str) -> None:
     """Roda todos os extractors na ordem definida."""
     etapa_extract_painel_compras(data_inicio)
-
-    # pegando série histórica completa
     etapa_extract_estoque()
     etapa_extract_servico("01/01/2014")
     etapa_extract_contrato("01/01/2014")
@@ -183,11 +210,7 @@ def etapa_transform_painel_compras() -> None:
     from stages.transform.transform_painel_compras import executar
 
     _secao("TRANSFORM — painel_compras")
-    executar(
-        input_dir=INPUT_DIR,
-        reference_dir=REFERENCE_DIR,
-        output_dir=OUTPUT_DIR,
-    )
+    executar(input_dir=INPUT_DIR, reference_dir=REFERENCE_DIR, output_dir=OUTPUT_DIR)
     logger.info("Transform painel_compras concluído.")
 
 
@@ -244,10 +267,6 @@ def etapa_transform_titulo() -> None:
 
 
 def etapa_transform() -> None:
-    """
-    Roda todos os transforms na ordem correta.
-    painel_compras sempre primeiro — gera as dims base que os demais dependem.
-    """
     etapa_transform_painel_compras()
     etapa_transform_estoque()
     etapa_transform_servico()
@@ -255,6 +274,32 @@ def etapa_transform() -> None:
     etapa_transform_adiantamento()
     etapa_transform_consulta_parcela()
     etapa_transform_titulo()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EXECUÇÕES DESTINADAS AOS PAINEIS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def painel_consultas() -> None:
+    etapa_extract_consulta_parcela("01/01/2026")
+    etapa_extract_titulo()
+
+    etapa_transform_consulta_parcela()
+    etapa_transform_titulo()
+
+
+def painel_suprimentos() -> None:
+    etapa_extract_painel_compras("01/01/2026")
+    etapa_extract_estoque()
+    etapa_extract_servico("01/01/2014")
+    etapa_extract_contrato("01/01/2014")
+    etapa_extract_adiantamento("01/01/2014")
+
+    etapa_transform_painel_compras()
+    etapa_transform_estoque()
+    etapa_transform_servico()
+    etapa_transform_contrato()
+    etapa_transform_adiantamento()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -277,6 +322,10 @@ _ETAPAS_VALIDAS = [
     "transform_servico",
     "transform_contrato",
     "transform_adiantamento",
+    "transform_consulta_parcela",
+    "transform_titulo",
+    "painel_consultas",
+    "painel_suprimentos"
 ]
 
 
@@ -365,6 +414,13 @@ def main() -> None:
     elif args.etapa == "all":
         etapa_extract(args.data_inicio)
         etapa_transform()
+
+    # ── Paineis ───────────────────────────────────────────────────────────────
+    elif args.etapa == "painel_consultas":
+        painel_consultas()
+
+    elif args.etapa == "painel_suprimentos":
+        painel_suprimentos()
 
     logger.info("Pipeline finalizado.")
 
