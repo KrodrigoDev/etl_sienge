@@ -1,5 +1,5 @@
 """
-stages/extract/extract_painel_compras.py
+stages/extract/extract_contratos.py
 -----------------------------------------
 Extrai o relatório de Painel de Compras do SIENGE e salva como CSV.
 
@@ -23,6 +23,8 @@ from pathlib import Path
 from time import sleep
 
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+
 
 from src.drivers.selenium_requester import BASE_URL, SeleniumRequester
 
@@ -113,18 +115,27 @@ def extrair_contratos(
         )
         sleep(2)
 
-        # ── 6. Seleciona 'Todas' as linhas ────────────────────────────────────
+        # ── Seleciona 'Todas/Todos' as linhas ─────────────────────────────────
         logger.info("Selecionando todas as linhas...")
-        driver.find_element(
-            By.XPATH, '//div[contains(@class,"MuiTablePagination-select")]'
-        ).click()
-        sleep(2)
 
-        req.aguardar_e_clicar(
-            wdw,
-            (By.XPATH, '//li[contains(.,"Todos")]'),
-            "Todas as linhas",
+        select_paginacao = wdw.until(
+            EC.element_to_be_clickable(
+                (By.XPATH, '//div[contains(@class,"MuiTablePagination-select")]')
+            )
         )
+        select_paginacao.click()
+
+        # Aguarda o item aparecer visível antes de clicar — evita click em elemento
+        # ainda não renderizado em headless
+        opcao_todas = wdw.until(
+            EC.visibility_of_element_located(
+                (By.XPATH, '//li[@role="option" and contains(.,"Todos")]')
+            )
+        )
+        driver.execute_script("arguments[0].click();", opcao_todas)
+
+        req.aguardar_carregamento_tabela(driver)
+        sleep(3)
 
         req.aguardar_carregamento_tabela(driver)
 

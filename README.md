@@ -7,47 +7,9 @@ Pipeline de extração e transformação dos dados do SIENGE para consumo no Pow
 ---
 
 ## Fluxo do Pipeline
+![Fluxo do Pipeline](image/pipeline_flow.png)
 
-```mermaid
----
-config:
-  layout: elk
----
-flowchart LR
-    Driver[SeleniumRequester]
-
-    subgraph EXTRACT
-        E1[painel_compras]
-        E2[estoque]
-        E3[servico]
-        E4[contrato]
-        E5[adiantamento]
-        E6[consulta_parcela]
-        E7[titulo]
-    end
-
-    subgraph TRANSFORM
-        T1[painel_compras *]
-        T2[estoque]
-        T3[servico]
-        T4[contrato]
-        T5[adiantamento]
-        T6[consulta_parcela]
-        T7[titulo]
-    end
-
-    OUTPUT[output/ > Power BI]
-
-    Driver -.-> EXTRACT
-    EXTRACT --> TRANSFORM
-    T1 --> T2
-    T1 --> T3
-    T1 --> T4
-    T1 --> T5
-    TRANSFORM --> OUTPUT
-```
-
-> **\*** `transform_painel_compras` deve rodar primeiro — gera `dim_obra`, `dim_insumo` e `dim_grupo_insumo` que os demais transforms consomem.
+>  `transform_painel_compras` deve rodar primeiro — gera `dim_obra`, `dim_insumo` e `dim_grupo_insumo` que os demais transforms consomem.
 
 > **Nota:** A etapa de Load atualmente entrega os dados via arquivos CSV em `output/`. A migração para banco de dados relacional está planejada para uma próxima fase.
 

@@ -42,7 +42,7 @@ Notas sobre o CSV de origem (SIENGE — Consulta de Parcelas)
 from __future__ import annotations
 
 import re
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import numpy as np
@@ -577,7 +577,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     ]].copy()
 
     # Data de carga — rastreia qual extração originou o registro
-    fato["data_carga"] = hoje.isoformat()
+    fato["data_carga"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     print(f"  fato_consulta_parcela: {fato.shape}")
     print(f"  PAGA:     {fato['flag_paga'].sum():,}")

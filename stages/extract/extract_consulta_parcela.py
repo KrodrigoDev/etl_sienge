@@ -96,31 +96,40 @@ def extrair_consulta_parcela(
         # ── 6. Seleciona '5000' linhas por página ─────────────────────────────
         logger.info("Selecionando 5000 linhas por página...")
 
-        # Aguarda o select ser clicável e abre o dropdown
+        # Aguarda o select estar presente e clicável
         select_paginacao = wdw.until(
             EC.element_to_be_clickable(
                 (By.XPATH, '//div[contains(@class,"MuiTablePagination-select")]')
             )
         )
         select_paginacao.click()
-        sleep(2)
 
-        # Aguarda o <li> aparecer no DOM e estar clicável
-        # role="option" evita pegar outros <li> que contenham "5000" em outro contexto
+        # Aguarda o dropdown abrir de fato — espera o <li> aparecer no DOM
+        # antes de tentar clicar, evitando click em elemento ainda não renderizado
         opcao_5000 = wdw.until(
-            EC.element_to_be_clickable(
+            EC.visibility_of_element_located(  # ← era element_to_be_clickable
                 (By.XPATH, '//li[@role="option" and contains(text(),"5000")]')
             )
         )
-        opcao_5000.click()
-        sleep(3)
+        driver.execute_script("arguments[0].click();", opcao_5000)  # ← JS click, mais confiável em headless
+        sleep(2)
 
         req.aguardar_carregamento_tabela(driver)
+        sleep(3)  # ← aguarda renderização após carregamento em headless
 
         pagina = 1
         while True:
 
             # ── 7. Exporta CSV ────────────────────────────────────────────────
+            # Aguarda que haja pelo menos uma linha de dado na tabela
+            # antes de abrir o modal — evita CSVs vazios em headless
+            wdw.until(
+                EC.presence_of_element_located(
+                    (By.CSS_SELECTOR, '.MuiDataGrid-row')
+                )
+            )
+            sleep(2)  # ← margem extra para renderização completa das linhas
+
             logger.info("Exportando CSV da página %d...", pagina)
             _exportar_csv_modal(wdw)
 
@@ -148,9 +157,6 @@ def extrair_consulta_parcela(
                 break
 
             # ── 11. Vai para a próxima página ─────────────────────────────────
-            # Usa JS para evitar ElementClickInterceptedException causado pelo
-            # widget de feedback flutuante (id="feedback-widget-floating-button")
-            # que fica sobreposto ao botão de paginação no canto da tela
             logger.info("Avançando para a página %d...", pagina + 1)
             driver.execute_script("arguments[0].click();", btn_proxima)
             pagina += 1

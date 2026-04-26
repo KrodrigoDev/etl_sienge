@@ -13,6 +13,7 @@ import sys
 import time
 from datetime import date
 from pathlib import Path
+from typing import Tuple
 
 sys.stdout.reconfigure(encoding="utf-8")
 sys.stderr.reconfigure(encoding="utf-8")
@@ -36,6 +37,7 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger(__name__)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HELPERS
@@ -63,17 +65,7 @@ def _com_retry(
     """
     Executa fn() até `tentativas` vezes em caso de falha.
 
-    Parâmetros
-    ----------
-    nome      : nome da etapa para log
-    fn        : callable sem argumentos (use lambda ou partial)
-    tentativas: número máximo de execuções (padrão 2)
-    espera    : segundos entre tentativas (padrão 20)
-
-    Retorna
-    -------
-    True  → etapa concluída com sucesso
-    False → todas as tentativas falharam (pipeline continua)
+    Retorna True se concluiu com sucesso, False se todas as tentativas falharam.
     """
     for tentativa in range(1, tentativas + 1):
         try:
@@ -102,15 +94,41 @@ def _com_retry(
     return False
 
 
+def _ja_executado_hoje(pasta: Path, extensao: str = "*.xlsx") -> bool:
+    """
+    Retorna True se existe algum arquivo na pasta com data de modificação = hoje.
+    Usado para evitar re-execução de extracts que rodam apenas uma vez por dia.
+    """
+    if not pasta.exists():
+        return False
+    return any(
+        date.fromtimestamp(f.stat().st_mtime) == date.today()
+        for f in pasta.glob(extensao)
+    )
+
+
+def _cancelar_transforms(etapas_falhas: list[str]) -> None:
+    """Loga de forma clara quais transforms foram cancelados e por quê."""
+    for etapa in etapas_falhas:
+        logger.error(
+            "'%s' falhou no extract — transform correspondente NÃO será executado.",
+            etapa,
+        )
+    logger.error(
+        "Pipeline encerrado com falhas nos extracts acima — "
+        "transforms cancelados para preservar consistência dos dados."
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # EXTRACT
 # ─────────────────────────────────────────────────────────────────────────────
 
-def etapa_extract_painel_compras(data_inicio: str) -> None:
+def etapa_extract_painel_compras(data_inicio: str) -> bool:
     from stages.extract.extract_painel_compras import extrair_painel_compras
 
     _secao("EXTRACT — painel_compras")
-    _com_retry(
+    return _com_retry(
         nome="extract_painel_compras",
         fn=lambda: extrair_painel_compras(
             data_inicio=data_inicio,
@@ -119,21 +137,21 @@ def etapa_extract_painel_compras(data_inicio: str) -> None:
     )
 
 
-def etapa_extract_estoque() -> None:
+def etapa_extract_estoque() -> bool:
     from stages.extract.extract_estoque import extrair_estoque
 
     _secao("EXTRACT — estoque")
-    _com_retry(
+    return _com_retry(
         nome="extract_estoque",
         fn=lambda: extrair_estoque(destino=INPUT_DIR / "estoque"),
     )
 
 
-def etapa_extract_servico(data_inicio: str) -> None:
+def etapa_extract_servico(data_inicio: str) -> bool:
     from stages.extract.extract_servico import extrair_servicos
 
     _secao("EXTRACT — servico")
-    _com_retry(
+    return _com_retry(
         nome="extract_servico",
         fn=lambda: extrair_servicos(
             data_inicio=data_inicio,
@@ -142,11 +160,11 @@ def etapa_extract_servico(data_inicio: str) -> None:
     )
 
 
-def etapa_extract_contrato(data_inicio: str) -> None:
+def etapa_extract_contrato(data_inicio: str) -> bool:
     from stages.extract.extract_contrato import extrair_contratos
 
     _secao("EXTRACT — contrato")
-    _com_retry(
+    return _com_retry(
         nome="extract_contrato",
         fn=lambda: extrair_contratos(
             data_inicio=data_inicio,
@@ -155,11 +173,11 @@ def etapa_extract_contrato(data_inicio: str) -> None:
     )
 
 
-def etapa_extract_adiantamento(data_inicio: str) -> None:
+def etapa_extract_adiantamento(data_inicio: str) -> bool:
     from stages.extract.extract_adiantamento import extrair_adiantamento
 
     _secao("EXTRACT — adiantamento")
-    _com_retry(
+    return _com_retry(
         nome="extract_adiantamento",
         fn=lambda: extrair_adiantamento(
             data_inicio=data_inicio,
@@ -168,11 +186,11 @@ def etapa_extract_adiantamento(data_inicio: str) -> None:
     )
 
 
-def etapa_extract_consulta_parcela(data_inicio: str) -> None:
+def etapa_extract_consulta_parcela(data_inicio: str) -> bool:
     from stages.extract.extract_consulta_parcela import extrair_consulta_parcela
 
     _secao("EXTRACT — Consulta Parcela")
-    _com_retry(
+    return _com_retry(
         nome="extract_consulta_parcela",
         fn=lambda: extrair_consulta_parcela(
             data_inicio=data_inicio,
@@ -181,14 +199,29 @@ def etapa_extract_consulta_parcela(data_inicio: str) -> None:
     )
 
 
-def etapa_extract_titulo() -> None:
+def etapa_extract_titulo() -> tuple[bool, bool]:
+    """
+    Executa o extract de títulos com skip automático se já foi rodado hoje.
+    Retorna True em ambos os casos (sucesso ou skip), False apenas se falhou.
+    O caller pode distinguir skip vs execução real pelo segundo valor retornado.
+    """
+    _secao("EXTRACT — Título")
+
+    titulo_dir = INPUT_DIR / "titulo"
+    if _ja_executado_hoje(titulo_dir):
+        logger.info(
+            "extract_titulo — arquivos de hoje já existem em '%s', pulando.",
+            titulo_dir,
+        )
+        return True, True  # (sucesso, foi_skip)
+
     from stages.extract.extract_titulo import extrair_titulo
 
-    _secao("EXTRACT — Título")
-    _com_retry(
+    ok = _com_retry(
         nome="extract_titulo",
-        fn=lambda: extrair_titulo(destino=INPUT_DIR / "titulo"),
+        fn=lambda: extrair_titulo(destino=titulo_dir),
     )
+    return ok, False  # (sucesso, foi_skip)
 
 
 def etapa_extract(data_inicio: str) -> None:
@@ -281,19 +314,56 @@ def etapa_transform() -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def painel_consultas() -> None:
-    etapa_extract_consulta_parcela("01/01/2026")
-    etapa_extract_titulo()
+    ok_parcela = etapa_extract_consulta_parcela("01/01/2026")
+    ok_titulo, titulo_skip = etapa_extract_titulo()
+
+    falhas = []
+    if not ok_parcela:
+        falhas.append("extract_consulta_parcela")
+    if not ok_titulo:
+        falhas.append("extract_titulo")
+
+    if falhas:
+        _cancelar_transforms(falhas)
+        return
 
     etapa_transform_consulta_parcela()
-    etapa_transform_titulo()
+
+    if titulo_skip:
+        logger.info(
+            "transform_titulo ignorado — extract_titulo não rodou hoje "
+            "(output em disco já está atualizado)."
+        )
+    else:
+        etapa_transform_titulo()
 
 
 def painel_suprimentos() -> None:
-    etapa_extract_painel_compras("01/01/2026")
-    etapa_extract_estoque()
-    etapa_extract_servico("01/01/2014")
-    etapa_extract_contrato("01/01/2014")
-    etapa_extract_adiantamento("01/01/2014")
+    """
+    Extrai todos os módulos de suprimentos.
+    Só roda os transforms se todos os extracts concluírem com sucesso.
+    """
+    ok_painel = etapa_extract_painel_compras("01/01/2026")
+    ok_estoque = etapa_extract_estoque()
+    ok_servico = etapa_extract_servico("01/01/2014")
+    ok_contrato = etapa_extract_contrato("01/01/2014")
+    ok_adiantamento = etapa_extract_adiantamento("01/01/2014")
+
+    falhas = []
+    if not ok_painel:
+        falhas.append("extract_painel_compras")
+    if not ok_estoque:
+        falhas.append("extract_estoque")
+    if not ok_servico:
+        falhas.append("extract_servico")
+    if not ok_contrato:
+        falhas.append("extract_contrato")
+    if not ok_adiantamento:
+        falhas.append("extract_adiantamento")
+
+    if falhas:
+        _cancelar_transforms(falhas)
+        return
 
     etapa_transform_painel_compras()
     etapa_transform_estoque()
@@ -325,7 +395,7 @@ _ETAPAS_VALIDAS = [
     "transform_consulta_parcela",
     "transform_titulo",
     "painel_consultas",
-    "painel_suprimentos"
+    "painel_suprimentos",
 ]
 
 
@@ -345,6 +415,8 @@ def main() -> None:
             "  transform                → todos os transforms em ordem\n"
             "  extract_<modulo>         → extração individual\n"
             "  transform_<modulo>       → transformação individual\n"
+            "  painel_consultas         → consulta_parcela + titulo (extract→transform)\n"
+            "  painel_suprimentos       → suprimentos completo (extract→transform)\n"
         ),
     )
     parser.add_argument(
