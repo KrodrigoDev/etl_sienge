@@ -59,7 +59,7 @@ def _secao(nome: str) -> None:
 def _com_retry(
         nome: str,
         fn,
-        tentativas: int = 2,
+        tentativas: int = 4,
         espera: int = 30,
 ) -> bool:
     """
