@@ -29,7 +29,6 @@ Enriquecimentos calculados
 
 from __future__ import annotations
 
-import re
 from datetime import date, datetime
 from pathlib import Path
 
@@ -37,7 +36,6 @@ import numpy as np
 import pandas as pd
 
 from stages.transform.utils.normalizer import (
-    normalizar_colunas,
     salvar_tabela,
 )
 
@@ -47,7 +45,7 @@ from stages.transform.utils.normalizer import (
 
 pasta_origem = Path(__file__).resolve().parents[2]
 
-INPUT_DIR  = pasta_origem / "stages" / "transform" / "input"
+INPUT_DIR = pasta_origem / "stages" / "transform" / "input"
 OUTPUT_DIR = pasta_origem / "stages" / "transform" / "output"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -219,8 +217,8 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     # ── 3. Conversão de tipos ─────────────────────────────────────────────────
     print("\n── 3. Conversão de tipos ───────────────────────────────────────────")
 
-    df["data_ativacao"]      = _parse_date(df["data_ativacao"])
-    df["data_desativacao"]   = _parse_date(df["data_desativacao"])
+    df["data_ativacao"] = _parse_date(df["data_ativacao"])
+    df["data_desativacao"] = _parse_date(df["data_desativacao"])
     df["data_ultimo_acesso"] = _parse_date(df["data_ultimo_acesso"])
 
     df["administrador"] = df["administrador"].astype(str).str.strip().str.lower() == "true"
@@ -241,15 +239,15 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     df["antiguidade_dias"] = (hoje - df["data_ativacao"]).dt.days.astype("float64")
 
     # Flags de status
-    df["flag_ativo"]          = df["data_desativacao"].isna()
-    df["flag_nunca_acessou"]  = df["data_ultimo_acesso"].isna()
-    df["flag_inativo_30d"]    = df["dias_sem_acesso"] > 30
-    df["flag_inativo_60d"]    = df["dias_sem_acesso"] > 60
-    df["flag_inativo_90d"]    = df["dias_sem_acesso"] > 90
-    df["flag_acessou_hoje"]   = df["data_ultimo_acesso"].dt.normalize() == hoje
-    df["flag_sistema_teste"]  = df["tipo_usuario"] == "sistema_teste"
-    df["flag_externo"]        = df["tipo_usuario"] == "externo"
-    df["flag_admin"]          = df["administrador"]
+    df["flag_ativo"] = df["data_desativacao"].isna()
+    df["flag_nunca_acessou"] = df["data_ultimo_acesso"].isna()
+    df["flag_inativo_30d"] = df["dias_sem_acesso"] > 30
+    df["flag_inativo_60d"] = df["dias_sem_acesso"] > 60
+    df["flag_inativo_90d"] = df["dias_sem_acesso"] > 90
+    df["flag_acessou_hoje"] = df["data_ultimo_acesso"].dt.normalize() == hoje
+    df["flag_sistema_teste"] = df["tipo_usuario"] == "sistema_teste"
+    df["flag_externo"] = df["tipo_usuario"] == "externo"
+    df["flag_admin"] = df["administrador"]
     df["flag_nunca_acessou_ativo"] = df["flag_nunca_acessou"] & df["flag_ativo"]
 
     # Faixas categóricas
@@ -368,11 +366,11 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         "Crítico (61-90d)", "Inativo (>90d)", "Nunca acessou",
     ]
     dim_faixa_inatividade = pd.DataFrame({
-        "id_faixa":          range(1, len(ordem) + 1),
+        "id_faixa": range(1, len(ordem) + 1),
         "faixa_inatividade": ordem,
-        "limite_dias_min":   [0,   8,  31,  61,  91, None],
-        "limite_dias_max":   [7,  30,  60,  90, None, None],
-        "cor_hex":           [
+        "limite_dias_min": [0, 8, 31, 61, 91, None],
+        "limite_dias_max": [7, 30, 60, 90, None, None],
+        "cor_hex": [
             "#22c55e",  # verde — ativo
             "#86efac",  # verde claro — recente
             "#facc15",  # amarelo — alerta
@@ -385,14 +383,14 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     # ── 8. Exportação ─────────────────────────────────────────────────────────
     print("\n── 8. Exportação ───────────────────────────────────────────────────")
 
-    salvar_tabela(dim_usuario,          "dim_usuario",          output_dir)
-    salvar_tabela(fato,                 "fato_acesso_usuario",  output_dir)
-    salvar_tabela(dim_faixa_inatividade,"dim_faixa_inatividade",output_dir)
+    salvar_tabela(dim_usuario, "dim_usuario", output_dir)
+    salvar_tabela(fato, "fato_acesso_usuario", output_dir)
+    salvar_tabela(dim_faixa_inatividade, "dim_faixa_inatividade", output_dir)
 
     print("\n── Resumo final ────────────────────────────────────────────────────")
     for nome, tabela in {
-        "dim_usuario":           dim_usuario,
-        "fato_acesso_usuario":   fato,
+        "dim_usuario": dim_usuario,
+        "fato_acesso_usuario": fato,
         "dim_faixa_inatividade": dim_faixa_inatividade,
     }.items():
         print(f"  {nome:<28} {str(tabela.shape):>12}")
@@ -407,6 +405,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
 
 if __name__ == "__main__":
     import logging
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",

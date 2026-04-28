@@ -42,10 +42,10 @@ URL_RELATORIO_USUARIO = (
     "#/common/page/2987"
 )
 
-# ID da tabela no HTML (confirmado pelo HTML fornecido)
+# ID da tabela no HTML
 TABELA_ID = "tabelaUsuarioRow"
 
-# Colunas que queremos extrair (na ordem das colunas da tabela)
+# Colunas que queremos extrair
 COLUNAS = [
     "codigo",
     "nome",
@@ -137,20 +137,20 @@ def _parsear_tabela_usuarios(html: str) -> pd.DataFrame:
             texto = span.get_text(strip=True)
             return texto if texto and texto != "\xa0" else None
 
-        data_ativacao    = _data(tds[7])
+        data_ativacao = _data(tds[7])
         data_desativacao = _data(tds[8])
-        data_ultimo      = _data(tds[9])
+        data_ultimo = _data(tds[9])
 
         registros.append(
             {
-                "codigo":              codigo,
-                "nome":                nome,
-                "email":               email,
-                "administrador":       administrador,
+                "codigo": codigo,
+                "nome": nome,
+                "email": email,
+                "administrador": administrador,
                 "provedor_identidade": provedor,
-                "data_ativacao":       data_ativacao,
-                "data_desativacao":    data_desativacao,
-                "data_ultimo_acesso":  data_ultimo,
+                "data_ativacao": data_ativacao,
+                "data_desativacao": data_desativacao,
+                "data_ultimo_acesso": data_ultimo,
             }
         )
 
@@ -158,11 +158,17 @@ def _parsear_tabela_usuarios(html: str) -> pd.DataFrame:
     return pd.DataFrame(registros, columns=COLUNAS)
 
 
+def _entrar_iframe(driver) -> None:
+    logger.info("Entrando no iframe do formulário")
+    driver.switch_to.default_content()
+    frame = driver.find_element(By.ID, "iFramePage")
+    driver.switch_to.frame(frame)
+
+
 # ── Função principal ──────────────────────────────────────────────────────────
 
 def extrair_usuario(
-    data_inicio: str | None = None,
-    destino: Path | None = None,
+        destino: Path | None = None,
 ) -> Path:
     """
     Extrai a listagem de usuários do SIENGE e salva como CSV.
@@ -198,11 +204,7 @@ def extrair_usuario(
         sleep(2)
 
         # ── 3. Entra no iframe e preenche filtros fixos ──────────────────────
-        logger.info("Entrando no iframe do formulário")
-        driver.switch_to.default_content()
-        frame = driver.find_element(By.ID, "iFramePage")
-        driver.switch_to.frame(frame)
-
+        _entrar_iframe(driver)
 
         # ── 4. Clica em "Consultar" ───────────────────────────────────────────
         logger.info("Clicando em Consultar...")
@@ -211,7 +213,6 @@ def extrair_usuario(
             (By.XPATH, '//input[@type="submit" and @value="Consultar"]'),
             "Consultar",
         )
-
 
         # ── 4. Aguarda a tabela aparecer ──────────────────────────────────────
         logger.info("Aguardando tabela de usuários carregar...")
@@ -243,17 +244,14 @@ def extrair_usuario(
         driver.get(URL_RELATORIO_USUARIO)
         sleep(2)
 
-        # ── 8. Entra no iframe e preenche filtros fixos ──────────────────────
-        driver.switch_to.default_content()
+        # ── 8. Entra no iframe e aperta no botão de visualizar ──────────────────────
+        driver.switch_to.parent_frame()
+        _entrar_iframe(driver)
 
-        logger.info("Entrando no iframe do formulário")
-        driver.switch_to.default_content()
-        frame = driver.find_element(By.ID, "iFramePage")
-        driver.switch_to.frame(frame)
-
+        sleep(0.5)
         req.aguardar_e_clicar(
             wdw,
-            (By.XPATH, '//input[@type="submit" and @value="Visualizar"]'),
+            (By.NAME, "btFiltrar"),
             "Botão Visualizar",
         )
 
@@ -271,7 +269,6 @@ def extrair_usuario(
 
     finally:
 
-        breakpoint()
         try:
             driver.quit()
         except Exception:
