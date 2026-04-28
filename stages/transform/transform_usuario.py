@@ -31,6 +31,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from pathlib import Path
+import re
 
 import numpy as np
 import pandas as pd
@@ -118,10 +119,115 @@ def _faixa_antiguidade(dias: float | None) -> str:
         return "Experiente (1-2 anos)"
     return "Veterano (>2 anos)"
 
+def _extrair_acao_id(acao: str) -> str | None:
+    if not isinstance(acao, str):
+        return None
+
+    match = re.search(r"\((\d+)\)$", acao)
+    return match.group(1) if match else None
 
 # ─────────────────────────────────────────────────────────────────────────────
 # LEITURA DAS FONTES
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _ler_acoes_sistema(input_dir: Path) -> pd.DataFrame:
+    arquivos = list((input_dir / "reference").glob("permissoes_sistema*.xlsx"))
+
+    if not arquivos:
+        raise FileNotFoundError(
+            f"Nenhum permissoes_sistema*.xlsx encontrado em {input_dir / 'reference'}"
+        )
+
+    arquivo = max(arquivos, key=lambda p: p.stat().st_mtime)
+
+    print(f"  Lendo Auxiliar Ações Sistema: {arquivo.name}")
+
+    df = pd.read_excel(arquivo, header=None)
+
+    # Supondo que a primeira coluna contém "Sistema", "Código", etc.
+    col0 = df.iloc[:, 0]
+
+    # Identifica linhas que são o cabeçalho "Sistema"
+    mask_sistema = col0.astype(str).str.strip().eq("Sistema")
+
+    # Pega a linha seguinte (onde está o nome do sistema)
+    df["sistema_temp"] = None
+
+    for idx in df.index[mask_sistema]:
+        if idx + 1 in df.index:
+            nome_sistema = df.iloc[idx + 1, 0]
+            df.loc[idx + 1:, "sistema_temp"] = nome_sistema
+
+    # Preenche para baixo até o próximo sistema
+    df["sistema"] = df["sistema_temp"].ffill()
+
+    # Remove linhas que são cabeçalhos
+    df = df[~col0.isin(["Sistema", "Código"])]
+
+    df = df.drop(columns=["sistema_temp", 1, 3])
+    df = df.reset_index(drop=True)
+
+
+    df.columns = ['codigo', 'acao', 'sistema']
+    df.dropna(subset=['acao'], inplace=True)
+
+    return df
+
+
+
+
+def _ler_permissao_usuario(input_dir: Path) -> pd.DataFrame:
+    arquivos = list((input_dir / "usuario").glob("permissao_usuario*.csv"))
+
+    if not arquivos:
+        raise FileNotFoundError(
+            f"Nenhum permissao_usuario_*.csv encontrado em {input_dir / 'usuario'}"
+        )
+
+    arquivo = max(arquivos, key=lambda p: p.stat().st_mtime)
+
+    print(f"  Lendo permissões: {arquivo.name}")
+
+    df = pd.read_csv(arquivo, sep=';')
+
+    # Renomeia a coluna da ação
+    df = df.rename(columns={'Unnamed: 0': 'acao'})
+
+    # Encontrar o index da linha
+    idx = df.loc[df["acao"] == "Todas as ações"].index
+    df = df.drop(index=idx)
+    df = df.reset_index(drop=True)
+
+    # MELT
+    df_melt = df.melt(
+        id_vars="acao",
+        var_name="usuario",
+        value_name="tem_permissao"
+    )
+
+    # Normalização opcional
+    df_melt["usuario"] = (
+        df_melt["usuario"]
+        .astype(str)
+        .str.strip()
+        .str.upper()
+    )
+
+    # Converter para boolean se vier como texto
+    df_melt["tem_permissao"] = (
+        df_melt["tem_permissao"]
+        .astype(str)
+        .str.strip()
+        .str.lower()
+        .isin(["true", "1", "sim", "x"])
+    )
+
+    df_melt['acao_id'] = df_melt["acao"].apply(_extrair_acao_id)
+
+    df_melt.dropna(subset=["acao_id"], inplace=True)
+
+    return df_melt
+
 
 def _ler_cadastro(input_dir: Path) -> pd.DataFrame:
     """Lê o CSV gerado pelo Selenium (cadastro de usuários)."""
@@ -188,9 +294,12 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
 
     df_cad = _ler_cadastro(input_dir)
     df_rel = _ler_relatorio(input_dir)
+    df_perm = _ler_permissao_usuario(input_dir) # separar a lógica disso depois e pegar somente o cod_acao
+    dim_acoes_sistema = _ler_acoes_sistema(INPUT_DIR)
 
     print(f"  Cadastro (CSV):    {len(df_cad):,} registros")
     print(f"  Relatório (XLSX):  {len(df_rel):,} registros")
+    print(f"  Permissão (CSV):  {len(df_perm):,} registros")
 
     # ── 2. Join entre as duas fontes ──────────────────────────────────────────
     print("\n── 2. Join cadastro + relatório ────────────────────────────────────")
@@ -360,45 +469,45 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     for status, cnt in fato["status_engajamento"].value_counts().items():
         print(f"    {status:<20} {cnt:>4}")
 
-    # ── 7. dim_faixa_inatividade (lookup para filtros no BI) ─────────────────
-    ordem = [
-        "Ativo (≤7d)", "Recente (8-30d)", "Alerta (31-60d)",
-        "Crítico (61-90d)", "Inativo (>90d)", "Nunca acessou",
+
+    # ── 7. dim_permissao  ─────────────────
+    fato_relacao = fato[fato['codigo'] != "ANACLARAAPRENDIZ"]
+
+    dim_permissao = pd.merge(
+        df_perm,
+        fato_relacao[['nome', 'id_usuario']], left_on='usuario', right_on='nome', how='left'
+    )
+
+    dim_permissao = dim_permissao[
+        dim_permissao['id_usuario'].notna()
     ]
-    dim_faixa_inatividade = pd.DataFrame({
-        "id_faixa": range(1, len(ordem) + 1),
-        "faixa_inatividade": ordem,
-        "limite_dias_min": [0, 8, 31, 61, 91, None],
-        "limite_dias_max": [7, 30, 60, 90, None, None],
-        "cor_hex": [
-            "#22c55e",  # verde — ativo
-            "#86efac",  # verde claro — recente
-            "#facc15",  # amarelo — alerta
-            "#f97316",  # laranja — crítico
-            "#ef4444",  # vermelho — inativo
-            "#94a3b8",  # cinza — nunca acessou
-        ],
-    })
+
+    dim_permissao = dim_permissao[['id_usuario','nome', 'usuario', 'acao_id', 'tem_permissao']]
+
+    dim_permissao['id_usuario'] = pd.to_numeric(dim_permissao['id_usuario'], errors='coerce')
+    dim_permissao.dropna(subset=['id_usuario', 'nome'], inplace=True)
+
 
     # ── 8. Exportação ─────────────────────────────────────────────────────────
     print("\n── 8. Exportação ───────────────────────────────────────────────────")
 
     salvar_tabela(dim_usuario, "dim_usuario", output_dir)
     salvar_tabela(fato, "fato_acesso_usuario", output_dir)
-    salvar_tabela(dim_faixa_inatividade, "dim_faixa_inatividade", output_dir)
+    salvar_tabela(dim_permissao, "dim_permissao", output_dir)
+    salvar_tabela(dim_acoes_sistema, "dim_acoes_sistema", output_dir)
 
     print("\n── Resumo final ────────────────────────────────────────────────────")
     for nome, tabela in {
         "dim_usuario": dim_usuario,
         "fato_acesso_usuario": fato,
-        "dim_faixa_inatividade": dim_faixa_inatividade,
+        "dim_permissao": dim_permissao,
     }.items():
         print(f"  {nome:<28} {str(tabela.shape):>12}")
 
     print("""
 ── Relacionamentos Power BI ──────────────────────────────────────────────────
   dim_usuario[id_usuario]          → fato_acesso_usuario[id_usuario]
-  dim_faixa_inatividade[faixa]     → fato_acesso_usuario[faixa_inatividade]
+  dim_permissao[id_usuario]     → fato_acesso_usuario[id_usuario]
     (relacionamento via coluna texto — ou criar surrogate key se necessário)
 """)
 
