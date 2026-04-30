@@ -35,6 +35,7 @@ import re
 
 import numpy as np
 import pandas as pd
+from openpyxl import load_workbook
 
 from stages.transform.utils.normalizer import (
     salvar_tabela,
@@ -62,6 +63,33 @@ CODIGOS_SISTEMA = {
     "RPATELESIL", "TITELESIL", "SUPER",
     "LCT01", "LCT02", "LCT03", "LCT04",
     "JAPRENDIZ", "NG7", "NOTASMARKETING",
+}
+
+# Mapeamento funcao_id → descrição para permissões por obra
+FUNCOES_OBRA_MAP: dict[int, str] = {
+    1: "Acesso - Orçamento",
+    2: "Acesso - Planejamento",
+    3: "Acesso - Acompanhamento",
+    4: "Acesso - Controle de Mão de Obra",
+    5: "Acesso - Gerencial de Obras",
+    6: "Acesso - Gerencial Financeiro",
+    7: "Acesso - Gerencial Suprimentos",
+    8: "Manutenção - Compras",
+    9: "Manutenção - Contratos",
+    10: "Manutenção - Medições",
+    11: "Manutenção - Estoque",
+    12: "Manutenção - Financeiro",
+    13: "Manutenção - Gestão da Qualidade",
+    14: "Manutenção - Administrativo",
+    15: "Manutenção - Comercial",
+    16: "Manutenção - Orçamento Empresarial",
+    17: "Manutenção - Diário de Obra",
+    18: "Manutenção - Integração SAP",
+    19: "Acesso - Custo Orçado e Incorrido",
+    20: "Acesso - Locações de Equipamentos",
+    21: "Acesso - Nota Fiscal Eletrônica",
+    22: "Exclusão de Anexos",
+    23: "Acesso - Apoio",
 }
 
 
@@ -278,6 +306,93 @@ def _ler_relatorio(input_dir: Path) -> pd.DataFrame:
     return df
 
 
+def _ler_permissao_obra(input_dir: Path) -> pd.DataFrame:
+    """
+    Lê o XLSX de autorizações de usuários por obra (SIENGE).
+
+    Estrutura do arquivo — grain externo = USUÁRIO (um bloco por usuário):
+      row+0: 'Usuário' | 'CODIGO - NOME USUARIO'
+      row+1: 'Funções' | (legenda texto, ignorada)
+      row+2: 'Obra'    | 'Funções'
+      row+3: None...   | 1 | 2 | 3 ... 23   ← funcao_id por coluna
+      row+4..N: 'CODIGO-NOME OBRA' | 'Sim'/None ...
+
+    Retorna fato_permissao_obra (grain = usuário × obra × função):
+        codigo_usuario | nome_usuario | obra_codigo | obra_nome
+        | funcao_id | funcao_nome | tem_acesso
+    """
+    arquivos = list((input_dir / "usuario").glob("permissao_obra*.xlsx"))
+    if not arquivos:
+        raise FileNotFoundError(
+            f"Nenhum permissao_obra*.xlsx encontrado em {input_dir / 'usuario'}"
+        )
+    arquivo = max(arquivos, key=lambda p: p.stat().st_mtime)
+    print(f"  Lendo permissão por obra: {arquivo.name}")
+
+    wb = load_workbook(arquivo, read_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+
+    # Início de cada bloco: linhas onde col 0 == 'Usuário'
+    usuario_starts = [i for i, r in enumerate(rows) if r[0] == "Usuário"]
+    print(f"    {len(usuario_starts)} usuários encontrados no arquivo")
+
+    registros: list[dict] = []
+
+    for bloco_idx, usr_row_i in enumerate(usuario_starts):
+        # ── Código e nome do usuário ──────────────────────────────────────────
+        usr_raw = next(
+            (v for j, v in enumerate(rows[usr_row_i]) if v and v != "Usuário"),
+            None,
+        )
+        partes_usr = str(usr_raw).split(" - ", 1) if usr_raw else ["", ""]
+        codigo_usuario = partes_usr[0].strip().upper()
+        nome_usuario = partes_usr[1].strip() if len(partes_usr) > 1 else None
+
+        # ── Mapeamento col_index → funcao_id (linha usr_row_i + 3) ───────────
+        num_row_i = usr_row_i + 3
+        num_row = rows[num_row_i]
+        col_to_funcao = {
+            col_i: int(v)
+            for col_i, v in enumerate(num_row)
+            if isinstance(v, (int, float)) and int(v) in FUNCOES_OBRA_MAP
+        }
+
+        # ── Linhas de obras (até o próximo bloco de usuário) ─────────────────
+        fim = (
+            usuario_starts[bloco_idx + 1]
+            if bloco_idx + 1 < len(usuario_starts)
+            else len(rows)
+        )
+
+        for row in rows[num_row_i + 1: fim]:
+            obra_raw = row[0]
+
+            if not isinstance(obra_raw, str) or not obra_raw.strip():
+                continue
+            if obra_raw.strip() in ("Obra", "Funções", "Usuário"):
+                continue
+
+            # Código da obra: tudo antes do primeiro '-'
+            partes_obra = str(obra_raw).split("-", 1)
+            obra_codigo = partes_obra[0].strip()
+            obra_nome = partes_obra[1].strip() if len(partes_obra) > 1 else obra_raw.strip()
+
+            for col_i, funcao_id in col_to_funcao.items():
+                val = row[col_i] if col_i < len(row) else None
+                tem_acesso = str(val).strip().lower() == "sim"
+                registros.append({
+                    "codigo_usuario": codigo_usuario,
+                    "nome_usuario": nome_usuario,
+                    "obra_codigo": obra_codigo,
+                    "obra_nome": obra_nome,
+                    "funcao_id": funcao_id,
+                    "funcao_nome": FUNCOES_OBRA_MAP[funcao_id],
+                    "tem_acesso": tem_acesso,
+                })
+
+    return pd.DataFrame(registros)
+
 # ─────────────────────────────────────────────────────────────────────────────
 # PONTO DE ENTRADA
 # ─────────────────────────────────────────────────────────────────────────────
@@ -296,10 +411,12 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     df_rel = _ler_relatorio(input_dir)
     df_perm = _ler_permissao_usuario(input_dir) # separar a lógica disso depois e pegar somente o cod_acao
     dim_acoes_sistema = _ler_acoes_sistema(INPUT_DIR)
+    fato_perm_obra_raw = _ler_permissao_obra(input_dir)
 
     print(f"  Cadastro (CSV):    {len(df_cad):,} registros")
     print(f"  Relatório (XLSX):  {len(df_rel):,} registros")
     print(f"  Permissão (CSV):  {len(df_perm):,} registros")
+    print(f"  Permissão obra:    {len(fato_perm_obra_raw):,} registros")
 
     # ── 2. Join entre as duas fontes ──────────────────────────────────────────
     print("\n── 2. Join cadastro + relatório ────────────────────────────────────")
@@ -487,6 +604,36 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     dim_permissao['id_usuario'] = pd.to_numeric(dim_permissao['id_usuario'], errors='coerce')
     dim_permissao.dropna(subset=['id_usuario', 'nome'], inplace=True)
 
+    # ── 8. fato_permissao_obra ────────────────────────────────────────────────
+    print("\n── 8. fato_permissao_obra ──────────────────────────────────────────")
+
+    # Tabela de lookup: codigo → id_usuario
+    codigo_para_id = fato[["codigo", "id_usuario"]].drop_duplicates("codigo")
+
+    fato_permissao_obra = fato_perm_obra_raw.merge(
+        codigo_para_id,
+        left_on="codigo_usuario",
+        right_on="codigo",
+        how="left",
+    ).drop(columns=["codigo"])
+
+    fato_permissao_obra.insert(0, "id_usuario", fato_permissao_obra.pop("id_usuario"))
+
+    sem_match = fato_permissao_obra["id_usuario"].isna().sum()
+    if sem_match:
+        usuarios_sem_match = (
+            fato_perm_obra_raw[
+                ~fato_perm_obra_raw["codigo_usuario"].isin(codigo_para_id["codigo"])
+            ]["codigo_usuario"].unique()
+        )
+        print(f"  ⚠ {len(usuarios_sem_match)} usuário(s) sem match no fato "
+              f"(só na obra): {list(usuarios_sem_match)}")
+
+    print(f"  fato_permissao_obra: {fato_permissao_obra.shape}")
+    print(f"  Obras distintas:     {fato_permissao_obra['obra_nome'].nunique()}")
+    print(f"  Usuários distintos:  {fato_permissao_obra['codigo_usuario'].nunique()}")
+    print(f"  Com acesso=True:     {fato_permissao_obra['tem_acesso'].sum():,}")
+
 
     # ── 8. Exportação ─────────────────────────────────────────────────────────
     print("\n── 8. Exportação ───────────────────────────────────────────────────")
@@ -495,6 +642,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     salvar_tabela(fato, "fato_acesso_usuario", output_dir)
     salvar_tabela(dim_permissao, "dim_permissao", output_dir)
     salvar_tabela(dim_acoes_sistema, "dim_acoes_sistema", output_dir)
+    salvar_tabela(fato_permissao_obra, "fato_permissao_obra", output_dir)
 
     print("\n── Resumo final ────────────────────────────────────────────────────")
     for nome, tabela in {
