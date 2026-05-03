@@ -380,7 +380,8 @@ class SeleniumRequester:
         )
 
     @staticmethod
-    def fechar_popup_novidade(wdw: WebDriverWait) -> None:
+    def fechar_popup_novidade(wdw: WebDriverWait,
+                              txt_locator='//div[@role="dialog"]//button[normalize-space()="Fechar"]') -> None:
         """
         Fecha o popup de "novidade" do SIENGE caso ele apareça após a navegação.
 
@@ -393,7 +394,7 @@ class SeleniumRequester:
         """
         locator_fechar = (
             By.XPATH,
-            '//div[@role="dialog"]//button[normalize-space()="Fechar"]',
+            txt_locator,
         )
 
         try:

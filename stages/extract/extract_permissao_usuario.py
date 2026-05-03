@@ -78,6 +78,8 @@ def extrair_permissao_usuario(
         sleep(2)
 
         req.fechar_popup_novidade(wdw)
+        sleep(0.5)
+        req.fechar_popup_novidade(wdw, txt_locator='//button[normalize-space()="Entendi"]')
 
         # ── 3. Preenchendo o nome de cada usuário ──────────────────────────────
         df_usuario = pd.read_csv('../transform/output/dim_usuario.csv', sep=';')
