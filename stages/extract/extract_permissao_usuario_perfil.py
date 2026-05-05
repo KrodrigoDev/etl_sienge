@@ -39,6 +39,41 @@ URL_CADASTRO_USUARIO = (
 )
 
 
+def _posterior_pesquisa(req, wdw, driver, destino, nome_arquivo):
+
+    # ── 4. Clica em "Consultar" ───────────────────────────────────────────
+    logger.info("Clicando em Consultar...")
+    req.aguardar_e_clicar(
+        wdw,
+        (By.ID, 'btn-consultar-autorizacoes'),
+        "Consultar",
+    )
+
+    # ── 4. Aguarda a tabela aparecer ──────────────────────────────────────
+    logger.info("Aguardando tabela de usuários carregar...")
+    req.aguardar_carregamento_tabela(driver)
+    # Pequena pausa extra para garantir que todas as linhas foram renderizadas
+    sleep(10)
+
+    # ── 5. Exporta CSV ────────────────────────────────────────────────────
+    logger.info("Exportando CSV do estoque...")
+    req.exportar_csv_modal(wdw)
+
+    # ── 6. Aguarda download ─────────────────────────────────────────────────
+    arquivo_baixado = req.aguardar_download(
+        extensao=".csv",
+        timeout=60,
+    )
+
+    # ── 10. Move para pasta de destino ────────────────────────────────────
+    nome_csv = nome_arquivo
+    arquivo_csv = destino / nome_csv
+    shutil.move(str(arquivo_baixado), str(arquivo_csv))
+    logger.info("Csv salvo em: %s", arquivo_csv)
+
+    sleep(10)
+
+
 # ── Função principal ──────────────────────────────────────────────────────────
 
 def extrair_permissao_usuario(
@@ -80,6 +115,58 @@ def extrair_permissao_usuario(
         req.fechar_popup_novidade(wdw)
         sleep(0.5)
         req.fechar_popup_novidade(wdw, txt_locator='//button[normalize-space()="Entendi"]')
+
+
+        # permissões por pefil
+        locator_campo_perfil = (By.XPATH, "//input[@placeholder='Pesquisar perfil']")
+        req.aguardar_e_clicar(wdw, locator_campo_perfil)
+
+        locator_options = (By.XPATH, "//li[@role='option']")
+        req.aguardar_presenca(wdw, locator_options)
+
+        opcoes = driver.find_elements(*locator_options)
+        nomes_perfis = [op.text.split('-', maxsplit=1)[0] for op in opcoes]
+
+        logger.info("Total de perfis a serem buscados: %s", len(nomes_perfis))
+        for perfil in nomes_perfis:
+            campo_perfil = req.aguardar_e_clicar(
+                wdw,
+                locator_campo_perfil,
+                "Campo pesquisar perfil",
+            )
+
+            campo_perfil.send_keys(f"{perfil}")
+
+            req.aguardar_presenca(
+                wdw,
+                (
+                    By.XPATH,
+                    f'//li[@role="option" and starts-with(normalize-space(), "{perfil}")]'
+                ),
+            )
+
+            # Clica na opção
+            req.aguardar_e_clicar(
+                wdw,
+                (
+                    By.XPATH,
+                    f'//li[@role="option" and starts-with(normalize-space(), "{perfil}")]'
+                ),
+            )
+
+            campo_perfil.send_keys(Keys.CONTROL, "a")
+            campo_perfil.send_keys(Keys.DELETE)
+
+            sleep(1)
+
+        req.aguardar_e_clicar(wdw, locator_campo_perfil)
+        _posterior_pesquisa(req, wdw, driver, destino, "permissao_perfil.csv")
+
+        req.aguardar_e_clicar(wdw, locator_campo_perfil)
+        botao_limpar = driver.find_element(By.XPATH, "//button[@aria-label='Limpar']")
+        botao_limpar.click()
+
+        # permissões por usuário
 
         # ── 3. Preenchendo o nome de cada usuário ──────────────────────────────
         df_usuario = pd.read_csv('../transform/output/dim_usuario.csv', sep=';')
@@ -133,36 +220,7 @@ def extrair_permissao_usuario(
             sleep(1)
 
         # ── 4. Clica em "Consultar" ───────────────────────────────────────────
-        logger.info("Clicando em Consultar...")
-        req.aguardar_e_clicar(
-            wdw,
-            (By.ID, 'btn-consultar-autorizacoes'),
-            "Consultar",
-        )
-
-        # ── 4. Aguarda a tabela aparecer ──────────────────────────────────────
-        logger.info("Aguardando tabela de usuários carregar...")
-        req.aguardar_carregamento_tabela(driver)
-        # Pequena pausa extra para garantir que todas as linhas foram renderizadas
-        sleep(10)
-
-        # ── 5. Exporta CSV ────────────────────────────────────────────────────
-        logger.info("Exportando CSV do estoque...")
-        req.exportar_csv_modal(wdw)
-
-        # ── 6. Aguarda download ─────────────────────────────────────────────────
-        arquivo_baixado = req.aguardar_download(
-            extensao=".csv",
-            timeout=60,
-        )
-
-        # ── 10. Move para pasta de destino ────────────────────────────────────
-        nome_csv = "permissao_usuario.csv"
-        arquivo_csv = destino / nome_csv
-        shutil.move(str(arquivo_baixado), str(arquivo_csv))
-        logger.info("Csv salvo em: %s", arquivo_csv)
-
-        return arquivo_csv
+        _posterior_pesquisa(req, wdw, driver, destino, "permissao_usuario.csv")
 
     finally:
         try:
@@ -188,5 +246,4 @@ if __name__ == "__main__":
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
-    caminho = extrair_permissao_usuario()
-    print(f"Extração concluída: {caminho}")
+    extrair_permissao_usuario()

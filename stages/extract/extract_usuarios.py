@@ -42,6 +42,26 @@ URL_RELATORIO_USUARIO = (
     "#/common/page/2987"
 )
 
+URL_PERFIL_USUARIO = (
+    f"{BASE_URL}/8/index.html"
+    "#/common/page/7708"
+)
+
+URL_AUTORIZACAO_EMPRESA = (
+    f"{BASE_URL}/8/index.html"
+    "#/common/page/2141"
+)
+
+URL_AUTORIZACAO_OBRA = (
+    f"{BASE_URL}/8/index.html"
+    "#/common/page/2549"
+)
+
+URL_AUTORIZACAO_DEPARTAMENTO = (
+    f"{BASE_URL}/8/index.html"
+    "#/common/page/2758"
+)
+
 # ID da tabela no HTML
 TABELA_ID = "tabelaUsuarioRow"
 
@@ -165,6 +185,49 @@ def _entrar_iframe(driver) -> None:
     driver.switch_to.frame(frame)
 
 
+def baixar_relatorio_iframe(
+        req: SeleniumRequester,
+        driver,
+        wdw,
+        url: str,
+        nome_arquivo: str,
+        destino: Path,
+        by: By = By.NAME,
+        locator: str = "btFiltrar",
+        timeout_download: int = 60,
+) -> Path:
+    logger.info("Acessando URL: %s", url)
+    driver.get(url)
+    sleep(2)
+
+    # Garante que está fora de qualquer iframe antes
+    driver.switch_to.default_content()
+
+    # Entra no iframe padrão
+    _entrar_iframe(driver)
+
+    logger.info("Clicando no botão de gerar relatório...")
+    req.aguardar_e_clicar(
+        wdw,
+        (by, locator),
+        f"Botão {locator}",
+    )
+
+    logger.info("Aguardando download...")
+    arquivo_baixado = req.aguardar_download(
+        extensao=".xlsx",
+        timeout=timeout_download,
+    )
+
+    destino.mkdir(parents=True, exist_ok=True)
+    caminho_final = destino / nome_arquivo
+
+    shutil.move(str(arquivo_baixado), str(caminho_final))
+    logger.info("Arquivo salvo em: %s", caminho_final)
+
+    return caminho_final
+
+
 # ── Função principal ──────────────────────────────────────────────────────────
 
 def extrair_usuario(
@@ -240,30 +303,55 @@ def extrair_usuario(
         logger.info("CSV salvo em: %s", arquivo_csv)
 
         # ── 7. Relatório XLSX ──────────────────────────────────────
-        logger.info("Navegando para o relatório de usuário: %s", URL_RELATORIO_USUARIO)
-        driver.get(URL_RELATORIO_USUARIO)
-        sleep(2)
+        logger.info("Iniciando demais relatórios: %s", URL_RELATORIO_USUARIO)
 
-        # ── 8. Entra no iframe e aperta no botão de visualizar ──────────────────────
-        driver.switch_to.parent_frame()
-        _entrar_iframe(driver)
-
-        sleep(0.5)
-        req.aguardar_e_clicar(
+        baixar_relatorio_iframe(
+            req,
+            driver,
             wdw,
-            (By.NAME, "btFiltrar"),
-            "Botão Visualizar",
+            URL_RELATORIO_USUARIO,
+            "relatorio_usuario.xlsx",
+            destino
+
         )
 
-        arquivo_baixado = req.aguardar_download(
-            extensao=".xlsx",
-            timeout=60,
+        baixar_relatorio_iframe(
+            req,
+            driver,
+            wdw,
+            URL_PERFIL_USUARIO,
+            "perfil_usuario.xlsx",
+            destino,
+            by=By.XPATH,
+            locator='//input[@type="submit" and @value="Visualizar"]'
         )
 
-        nome_xlsx = "relatorio_usuario.xlsx"
-        arquivo_xlsx = destino / nome_xlsx
-        shutil.move(str(arquivo_baixado), str(arquivo_xlsx))
-        logger.info("XLSX salvo em: %s", arquivo_xlsx)
+        baixar_relatorio_iframe(
+            req,
+            driver,
+            wdw,
+            URL_AUTORIZACAO_EMPRESA,
+            "permissao_empresa.xlsx",
+            destino,
+        )
+
+        baixar_relatorio_iframe(
+            req,
+            driver,
+            wdw,
+            URL_AUTORIZACAO_OBRA,
+            "permissao_obra.xlsx",
+            destino,
+        )
+
+        baixar_relatorio_iframe(
+            req,
+            driver,
+            wdw,
+            URL_AUTORIZACAO_DEPARTAMENTO,
+            "permissao_departamento.xlsx",
+            destino,
+        )
 
         return arquivo_csv
 

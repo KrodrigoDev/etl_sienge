@@ -57,6 +57,7 @@ def extrair_consulta_parcela(
 
         # ── 2. Navega para o painel ───────────────────────────────────────────
         logger.info("Navegando para os serviços...")
+
         driver.get(URL_PAINEL)
         sleep(2)
         req.fechar_popup_novidade(wdw)
@@ -68,7 +69,16 @@ def extrair_consulta_parcela(
             (By.CSS_SELECTOR, 'input[name="dataVencimentoInicial"]'),
             data_inicio,
         )
-        sleep(1)
+        sleep(1.5)
+
+        data_final = f'31/12/{date.today().year}'
+        logger.info("Preenchendo data final: %s", data_final)
+        req.preencher_campo(
+            wdw,
+            (By.CSS_SELECTOR, 'input[name="dataVencimentoFinal"]'),
+            data_final,
+        )
+        sleep(1.5)
 
         # ── 5. Consultar ──────────────────────────────────────────────────────
         logger.info("Consultando...")
