@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import logging
 from time import sleep
@@ -15,36 +16,68 @@ logger = logging.getLogger(__name__)
 URL_CADASTRO_CLIENTE = f"{BASE_URL}/8/index.html#/apoio/pessoas/clientes"
 
 INPUT_DADOS = '../rpa/input/empreendimentos_2674489_4-5-2026.xlsx'
-
-# necessário para saber o andamento e antes de rodar novamente verificar se já existe para pular os clientes que já foram feitos
-# caso tenha algum erro e seja necessário rodar novamente
 OUTPUT_DADOS = '../rpa/output/empreendimentos_2674489_4-5-2026_output.xlsx'
 
 # Valor do option "REGISTRADO" no select de tipo cliente
 CD_TIPO_CLIENTE_REGISTRADO = "3"
 
 
+def normalizar_cpf_cnpj(valor) -> str:
+    """
+    Garante que CPF (11 dígitos) e CNPJ (14 dígitos) tenham os zeros à esquerda.
+    Trata valores numéricos que o Excel converte para int/float perdendo o zero inicial.
+
+    Exemplos:
+        6171535400   -> '06171535400'   (CPF com zero faltando)
+        61715354000  -> '061715354000'  (nunca deve ocorrer, mas seguro)
+        12345678000195 -> '12345678000195' (CNPJ já correto)
+
+    :return: String com zeros à esquerda preenchidos conforme tamanho (11 ou 14)
+    """
+    # Remove casas decimais caso o Excel tenha lido como float (ex: 6171535400.0)
+    valor_str = str(valor).strip().split('.')[0]
+
+    tamanho = len(valor_str)
+
+    if tamanho <= 11:
+        return valor_str.zfill(11)  # CPF
+    else:
+        return valor_str.zfill(14)  # CNPJ
+
+
 def processamento_dados() -> pd.DataFrame:
     """
-    Considerar apenas os usuários que tiveram a data de inclusão dos dados de registro (CRI) e
-    criar uma coluna chamada 'situacao' para conseguir acompanhar o progresso dos registros.
-    Também cria coluna 'tipo' para indicar se é titular ou cônjuge.
+    Retorna o DataFrame de clientes a processar, priorizando o output já existente.
 
-    :return: Dataframe com os dados do registro válidos
+    - Se OUTPUT_DADOS existir: carrega ele (contém progresso anterior + cônjuges já
+      descobertos) e filtra apenas as linhas com situacao diferente de 'concluido'.
+    - Se não existir: carrega o INPUT_DADOS, filtra apenas quem tem data de CRI,
+      e inicializa as colunas de controle 'situacao' e 'tipo'.
+
+    Em ambos os casos normaliza a coluna 'CPF/CNPJ Mutuário' com zeros à esquerda.
+
+    :return: DataFrame pronto para iterar
     """
-    df_clientes = pd.read_excel(INPUT_DADOS)
+    if os.path.exists(OUTPUT_DADOS):
+        logger.info(f"Output anterior encontrado. Carregando '{OUTPUT_DADOS}'...")
+        df = pd.read_excel(OUTPUT_DADOS, dtype={'CPF/CNPJ Mutuário': str})
+        pendentes = df[df['situacao'] != 'concluido'].shape[0]
+        logger.info(f"{pendentes} registro(s) pendente(s) para processar.")
+    else:
+        logger.info("Nenhum output anterior. Carregando input original...")
+        df = pd.read_excel(INPUT_DADOS, dtype={'CPF/CNPJ Mutuário': str})
+        df = df.dropna(subset=['Data de Inclusão dos Dados de Registro(CRI)'])
 
-    df_clientes = df_clientes.dropna(subset=['Data de Inclusão dos Dados de Registro(CRI)'])
+        colunas = df.columns.tolist()
+        if 'situacao' not in colunas:
+            df.loc[:, 'situacao'] = pd.NA
+        if 'tipo' not in colunas:
+            df.loc[:, 'tipo'] = 'titular'
 
-    colunas = df_clientes.columns.tolist()
+    # Normaliza zeros à esquerda em toda execução (input e output)
+    df['CPF/CNPJ Mutuário'] = df['CPF/CNPJ Mutuário'].apply(normalizar_cpf_cnpj)
 
-    if 'situacao' not in colunas:
-        df_clientes.loc[:, 'situacao'] = pd.NA
-
-    if 'tipo' not in colunas:
-        df_clientes.loc[:, 'tipo'] = 'titular'
-
-    return df_clientes
+    return df
 
 
 def salvar_progresso(df: pd.DataFrame) -> None:
@@ -67,7 +100,6 @@ def verificar_unico_resultado(driver) -> bool:
         for el in paginacao_elements:
             texto = el.text.strip()
             logger.debug(f"Paginação encontrada: '{texto}'")
-            # Aceita formatos como "1–1 de 1" ou "1-1 de 1"
             if texto.replace("–", "-").startswith("1-1 de 1"):
                 return True
         return False
@@ -76,11 +108,6 @@ def verificar_unico_resultado(driver) -> bool:
 
 
 def clicar_botao_editar(wdw) -> bool:
-    """
-    Clica no botão de editar (ícone de lápis) da linha de resultado.
-
-    :return: True se conseguiu clicar, False caso contrário
-    """
     try:
         botao_editar = wdw.until(
             EC.element_to_be_clickable(
@@ -96,11 +123,6 @@ def clicar_botao_editar(wdw) -> bool:
 
 
 def entrar_iframe(driver, wdw) -> bool:
-    """
-    Aguarda e entra no iframe do formulário de edição.
-
-    :return: True se conseguiu entrar no iframe, False caso contrário
-    """
     try:
         driver.switch_to.default_content()
         wdw.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "iFramePage")))
@@ -112,12 +134,6 @@ def entrar_iframe(driver, wdw) -> bool:
 
 
 def atualizar_tipo_cliente_se_necessario(driver, wdw) -> bool:
-    """
-    Verifica o select de tipo cliente. Caso não esteja como REGISTRADO (value="3"),
-    altera para REGISTRADO.
-
-    :return: True se o campo estava correto ou foi alterado com sucesso, False em caso de erro
-    """
     try:
         select_element = wdw.until(
             EC.presence_of_element_located((By.NAME, "entity.cdTipoCliente"))
@@ -131,7 +147,6 @@ def atualizar_tipo_cliente_se_necessario(driver, wdw) -> bool:
             logger.info("Tipo cliente já está como REGISTRADO. Nenhuma alteração necessária.")
             return True
 
-        # Altera para REGISTRADO
         select.select_by_value(CD_TIPO_CLIENTE_REGISTRADO)
         logger.info("Tipo cliente alterado para REGISTRADO.")
         return True
@@ -142,33 +157,28 @@ def atualizar_tipo_cliente_se_necessario(driver, wdw) -> bool:
 
 
 def clicar_salvar(driver, wdw) -> bool:
-    """
-    Clica no botão Salvar dentro do iframe.
-
-    :return: True se conseguiu clicar, False caso contrário
-    """
     try:
         botao_salvar = wdw.until(
             EC.element_to_be_clickable((By.NAME, "pbSalvar"))
         )
         botao_salvar.click()
         logger.info("Botão Salvar clicado com sucesso.")
-        sleep(2)  # aguarda o processamento do save
+        sleep(2)
         return True
     except TimeoutException:
         logger.error("Botão Salvar não encontrado ou não clicável.")
         return False
 
 
-def obter_nome_conjuge(driver, wdw) -> str | None:
+def obter_cpf_conjuge(driver, wdw) -> str | None:
     """
     Dentro do iframe do formulário do cliente, clica na aba de Cônjuge
-    e retorna o nome do cônjuge caso o campo esteja preenchido.
+    e retorna o CPF do cônjuge normalizado (com zeros à esquerda) caso esteja preenchido.
 
-    :return: Nome do cônjuge como string, ou None se não houver
+    :return: CPF do cônjuge como string normalizada, ou None se não houver
     """
     try:
-        # Clica no link da aba Cônjuge (ainda dentro do iframe)
+        sleep(0.5)
         link_conjuge = wdw.until(
             EC.element_to_be_clickable(
                 (By.XPATH, '//a[normalize-space(text())="Cônjuge"]')
@@ -178,17 +188,17 @@ def obter_nome_conjuge(driver, wdw) -> str | None:
         logger.info("Aba Cônjuge clicada.")
         sleep(1)
 
-        # Lê o campo de nome do cônjuge
-        campo_nome = wdw.until(
-            EC.presence_of_element_located((By.NAME, "entity.conjuge.nmConjuge"))
+        campo_cpf = wdw.until(
+            EC.presence_of_element_located((By.NAME, "entity.conjuge.nuCPF"))
         )
-        nome_conjuge = campo_nome.get_attribute("value").strip()
+        cpf_bruto = campo_cpf.get_attribute("value").strip()
 
-        if nome_conjuge:
-            logger.info(f"Cônjuge encontrado: '{nome_conjuge}'")
-            return nome_conjuge
+        if cpf_bruto:
+            cpf_conjuge = normalizar_cpf_cnpj(cpf_bruto)
+            logger.info(f"Cônjuge encontrado com CPF: '{cpf_conjuge}' (bruto: '{cpf_bruto}')")
+            return cpf_conjuge
 
-        logger.info("Campo nome do cônjuge está vazio.")
+        logger.info("Campo CPF do cônjuge está vazio.")
         return None
 
     except TimeoutException:
@@ -196,22 +206,19 @@ def obter_nome_conjuge(driver, wdw) -> str | None:
         return None
 
 
-def processar_cliente(nome: str, tipo: str, driver, wdw, req) -> tuple[bool, str | None]:
+def processar_cliente(cnpj_cpf: str, tipo: str, driver, wdw, req) -> tuple[bool, str | None]:
     """
     Fluxo completo de busca, edição e salvamento de um cliente (titular ou cônjuge).
 
-    :return: (sucesso, nome_conjuge_encontrado)
-        - sucesso: True se o cliente foi processado com êxito
-        - nome_conjuge_encontrado: nome do cônjuge se for titular e tiver cônjuge, senão None
+    :return: (sucesso, cpf_conjuge_encontrado)
     """
-    logger.info(f"Processando [{tipo}]: '{nome}'")
+    logger.info(f"Processando [{tipo}]: '{cnpj_cpf}'")
 
-    # ── Busca o cliente ──────────────────────────────────────────────────────
     driver.switch_to.default_content()
-    campo_cliente = req.aguardar_e_clicar(wdw, (By.NAME, "nomeCliente"))
-    campo_cliente.send_keys(Keys.CONTROL, "a")
-    campo_cliente.send_keys(Keys.DELETE)
-    campo_cliente.send_keys(nome)
+    campo_cnpj_cpf = req.aguardar_e_clicar(wdw, (By.NAME, "cnpjCpf"))
+    campo_cnpj_cpf.send_keys(Keys.CONTROL, "a")
+    campo_cnpj_cpf.send_keys(Keys.DELETE)
+    campo_cnpj_cpf.send_keys(cnpj_cpf)
 
     req.aguardar_e_clicar(
         wdw,
@@ -221,37 +228,30 @@ def processar_cliente(nome: str, tipo: str, driver, wdw, req) -> tuple[bool, str
 
     req.aguardar_carregamento_tabela(driver)
 
-    # ── Verifica resultado único ─────────────────────────────────────────────
     if not verificar_unico_resultado(driver):
-        logger.warning(f"'{nome}' [{tipo}]: resultado não é exatamente 1 registro. Pulando...")
+        logger.warning(f"'{cnpj_cpf}' [{tipo}]: resultado não é exatamente 1 registro. Pulando...")
         return False, None
 
-    # ── Abre edição ──────────────────────────────────────────────────────────
     if not clicar_botao_editar(wdw):
         return False, None
 
     sleep(1.5)
 
-    # ── Entra no iframe ──────────────────────────────────────────────────────
     if not entrar_iframe(driver, wdw):
         return False, None
 
-    # ── Atualiza tipo cliente ────────────────────────────────────────────────
     if not atualizar_tipo_cliente_se_necessario(driver, wdw):
         return False, None
 
-    # ── Salva ────────────────────────────────────────────────────────────────
     if not clicar_salvar(driver, wdw):
         return False, None
 
-    # ── Lê cônjuge apenas para titulares ────────────────────────────────────
-    nome_conjuge = None
+    cpf_conjuge = None
     if tipo == 'titular':
-        # Após o save o iframe recarrega; re-entra para acessar a aba cônjuge
         if entrar_iframe(driver, wdw):
-            nome_conjuge = obter_nome_conjuge(driver, wdw)
+            cpf_conjuge = obter_cpf_conjuge(driver, wdw)
 
-    return True, nome_conjuge
+    return True, cpf_conjuge
 
 
 # ── Inicialização ────────────────────────────────────────────────────────────
@@ -263,33 +263,31 @@ driver = req.get_driver()
 wdw = req.waiter(driver)
 
 try:
-    # ── 1. Acesso inicial ────────────────────────────────────────────────
     req.navegacao_inicial(driver, wdw)
 
-    # ── 2. Navega para o cadastro de clientes ────────────────────────────
     logger.info("Navegando para o cadastro de clientes...")
     driver.get(URL_CADASTRO_CLIENTE)
     sleep(2)
 
     df_clientes = processamento_dados()
 
-    # Linhas de cônjuges descobertos durante o loop (adicionadas ao final)
+    # Cônjuges descobertos nesta execução (serão concatenados ao final)
     linhas_conjuge: list[dict] = []
 
     for index, row in df_clientes.iterrows():
 
-
         nome = row['Nome Mutuário']
+        cnpj_cpf = row['CPF/CNPJ Mutuário']  # já normalizado pelo processamento_dados()
         tipo = row.get('tipo', 'titular')
 
-        # Pula registros já processados com sucesso
+        # Pula apenas os que já foram concluídos com sucesso
         if pd.notna(row['situacao']) and row['situacao'] == 'concluido':
             logger.info(f"[{index}] '{nome}' já processado. Pulando...")
             continue
 
         try:
-            sucesso, nome_conjuge = processar_cliente(
-                nome=nome,
+            sucesso, cpf_conjuge = processar_cliente(
+                cnpj_cpf=cnpj_cpf,
                 tipo=tipo,
                 driver=driver,
                 wdw=wdw,
@@ -303,30 +301,26 @@ try:
                 sleep(1.5)
                 continue
 
-            # ── Marca titular como concluído ─────────────────────────────
             df_clientes.at[index, 'situacao'] = 'concluido'
             logger.info(f"[{index}] '{nome}' [{tipo}]: processado com sucesso.")
 
-            # ── Processa cônjuge encontrado ──────────────────────────────
-            if nome_conjuge:
-                # Evita duplicatas: checa tanto nos cônjuges já enfileirados
-                # quanto nos titulares originais do DataFrame
+            if cpf_conjuge:
                 ja_existe = (
-                    any(lc['Nome Mutuário'] == nome_conjuge for lc in linhas_conjuge)
-                    or (df_clientes['Nome Mutuário'] == nome_conjuge).any()
+                        any(lc['CPF/CNPJ Mutuário'] == cpf_conjuge for lc in linhas_conjuge)
+                        or (df_clientes['CPF/CNPJ Mutuário'] == cpf_conjuge).any()
                 )
 
                 if ja_existe:
-                    logger.info(f"Cônjuge '{nome_conjuge}' já existe na tabela. Pulando.")
+                    logger.info(f"Cônjuge CPF '{cpf_conjuge}' já existe na tabela. Pulando.")
                 else:
-                    logger.info(f"Cônjuge '{nome_conjuge}' encontrado. Processando...")
+                    logger.info(f"Cônjuge CPF '{cpf_conjuge}' encontrado. Processando...")
 
                     driver.switch_to.default_content()
                     driver.get(URL_CADASTRO_CLIENTE)
                     sleep(1.5)
 
                     sucesso_conjuge, _ = processar_cliente(
-                        nome=nome_conjuge,
+                        cnpj_cpf=cpf_conjuge,
                         tipo='conjuge',
                         driver=driver,
                         wdw=wdw,
@@ -334,17 +328,17 @@ try:
                     )
 
                     linhas_conjuge.append({
-                        'Nome Mutuário': nome_conjuge,
+                        'CPF/CNPJ Mutuário': cpf_conjuge,
                         'tipo': 'conjuge',
                         'situacao': 'concluido' if sucesso_conjuge else 'erro_conjuge',
                     })
 
                     logger.info(
-                        f"Cônjuge '{nome_conjuge}': "
+                        f"Cônjuge '{cpf_conjuge}': "
                         f"{'concluído' if sucesso_conjuge else 'erro'}."
                     )
 
-            breakpoint()
+            sleep(1.5)
 
         except Exception as e:
             logger.error(f"[{index}] '{nome}': erro inesperado — {e}", exc_info=True)
@@ -356,7 +350,7 @@ try:
             driver.get(URL_CADASTRO_CLIENTE)
             sleep(1.5)
 
-    # ── Consolida cônjuges descobertos no DataFrame final ────────────────
+    # Consolida cônjuges descobertos nesta execução
     if linhas_conjuge:
         df_conjuges = pd.DataFrame(linhas_conjuge)
         df_clientes = pd.concat([df_clientes, df_conjuges], ignore_index=True)
