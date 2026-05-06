@@ -40,6 +40,9 @@ Thumbs.db
 stages/transform/input/
 stages/transform/output/
 
+stages/rpa/input/
+stages/rpa/output/
+
 # =========================
 # Jupyter (se usar)
 # =========================
