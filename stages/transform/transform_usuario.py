@@ -645,6 +645,29 @@ def _ler_permissao_obra(input_dir: Path) -> pd.DataFrame:
     return pd.DataFrame(registros)
 
 
+def _ler_auxiliar_censo_telesil() -> pd.DataFrame:
+    """
+    Lê dados externos que foram levantados a partir de um censo criado no forms, destinado exlusivamente aos colaboradores do escrtório
+    com o intuito de conseguir o setor, tipo de vículo e outras informações relevantes do usuário/pessoa.
+
+    :return: DataFrame
+    """
+
+    print(f"Lendo Auxiliar Censo")
+
+    url = 'https://docs.google.com/spreadsheets/d/1QSq7WE0_MgCz8SgkX4-pTqtcRFydxFrGlR9jejsxrYw/export?format=csv'
+
+    df = pd.read_csv(url)
+    colunas = df.columns.tolist()
+    df.columns = [str(coluna).strip() for coluna in colunas]
+
+    df['E-mail corporativo'] = df['E-mail corporativo'].apply(lambda x: str(x).strip().lower())
+
+    df['chave_email'] = df['E-mail corporativo'].apply(lambda x: str(x).split('@', maxsplit=1)[0])
+
+    return df
+
+
 def _gerar_mapeamento_cargo_perfil() -> pd.DataFrame:
     """
     Converte MAPEAMENTO_CARGO_PERFIL em dim_mapeamento_cargo_perfil.
@@ -774,6 +797,17 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         "flag_ativo", "flag_admin", "flag_externo", "flag_sistema_teste",
         "faixa_antiguidade", "antiguidade_dias",
     ]].copy()
+
+    dim_usuario['chave_email'] = dim_usuario['email'].apply(lambda x: str(x).split("@", maxsplit=1)[0])
+
+    censo_escritorio = _ler_auxiliar_censo_telesil()
+
+    dim_usuario = pd.merge(
+        dim_usuario, censo_escritorio[['E-mail corporativo', 'Setor', 'Tipo do vínculo', 'chave_email']],
+        on='chave_email',
+        how="left"
+    )
+
     dim_usuario.insert(0, "id_usuario", range(1, len(dim_usuario) + 1))
     print(f"  dim_usuario: {dim_usuario.shape}")
 

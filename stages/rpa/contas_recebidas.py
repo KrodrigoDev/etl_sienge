@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
-REPORT_URL  = "https://telesil.sienge.com.br/sienge/8/index.html#/common/page/4929"
+REPORT_URL = "https://telesil.sienge.com.br/sienge/8/index.html#/common/page/4929"
 IFRAME_NAME = "iFramePage"
 
 TIPOS_CLIENTE_IDS = [3, 6]  # 3 = Registrado, 6 = Venda Direta
@@ -52,12 +52,12 @@ CONDICOES_SIGLAS = [
 ]
 
 AUXILIAR_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "stages" / "rpa" / "files" / "reference" / "auxiliar.xlsx"
+        Path(__file__).resolve().parents[2]
+        / "stages" / "rpa" / "files" / "reference" / "auxiliar.xlsx"
 )
 BASE_OUTPUT_DIR = (
-    Path(__file__).resolve().parents[2]
-    / "stages" / "rpa" / "output" / "contas_recebidas"
+        Path(__file__).resolve().parents[2]
+        / "stages" / "rpa" / "files" / "output" / "contas_recebidas"
 )
 
 
@@ -83,7 +83,7 @@ def fim_de_mes(d: date) -> date:
 
 def meses_no_intervalo(inicio: date, fim: date) -> list[tuple[date, date]]:
     periodos = []
-    cursor   = inicio.replace(day=1)
+    cursor = inicio.replace(day=1)
     fim_alvo = fim.replace(day=1)
     while cursor <= fim_alvo:
         periodos.append((cursor, fim_de_mes(cursor)))
@@ -125,13 +125,13 @@ def parse_data(val) -> date | None:
 # ── Helper genérico de lupa (botProcurar) ────────────────────────────────────
 
 def selecionar_via_lupa(
-    driver,
-    wdw: WebDriverWait,
-    locator_lupa: tuple,
-    campo_pesquisa_name: str,
-    codigo: str | list,
-    descricao: str = "",
-    busca_simple: bool = True,
+        driver,
+        wdw: WebDriverWait,
+        locator_lupa: tuple,
+        campo_pesquisa_name: str,
+        codigo: str | list,
+        descricao: str = "",
+        busca_simple: bool = True,
 ) -> None:
     """
     Preenche qualquer campo de lookup do Sienge via botProcurar.
@@ -285,51 +285,93 @@ def _toggle_sintetico(wdw: WebDriverWait, ativar: bool) -> None:
     sleep(0.3)
 
 
-def _gerar_e_salvar(
-    wdw: WebDriverWait,
-    requester: SeleniumRequester,
-    slug_cc: str,
-    label: str,          # ex: grand_paladium__obra_202509_sintetico
-) -> None:
+def _limpar_temp(requester: SeleniumRequester) -> None:
     """
-    Gera o relatório, aguarda o download e move para
-    dados_brutos/{slug_cc}/{label}.xlsx — garantindo que o
-    arquivo aterrissar na pasta certa independentemente da ordem
-    em que o Sienge termina cada download.
+    Remove todos os .xlsx e .crdownload da pasta temp antes de cada
+    geração — garante que aguardar_download nunca pegue um arquivo
+    de uma rodada anterior que ainda não foi movido.
     """
-    destino = pasta_brutos(slug_cc) / f"{label}.xlsx"
+    for f in requester.download_dir.iterdir():
+        if f.suffix in (".xlsx", ".crdownload"):
+            try:
+                f.unlink()
+                logger.debug("Temp removido: %s", f.name)
+            except Exception:
+                pass
 
+
+def _gerar_e_salvar(
+        driver,
+        wdw: WebDriverWait,
+        requester: SeleniumRequester,
+        slug_cc: str,
+        label: str,  # ex: grand_paladium__obra_202509_sintetico
+) -> bool:
+    """
+    Gera o relatório, verifica se há dados e, caso positivo, aguarda o
+    download e move para dados_brutos/{slug_cc}/{label}.xlsx.
+
+    Retorna True se o arquivo foi baixado, False se o Sienge indicou
+    'Não há registros para os parâmetros informados.'
+
+    Fluxo:
+      1. Limpa a pasta temp  ← impede que arquivo anterior seja retornado
+      2. Clica em Gerar
+      3. Verifica alerta de sem dados
+      4. Aguarda o download aparecer na pasta temp (agora vazia)
+      5. Move e renomeia para dados_brutos/
+    """
+    # 1. Pasta temp vazia antes de disparar o download
+    _limpar_temp(requester)
+
+    # 2. Dispara a geração
     SeleniumRequester.aguardar_e_clicar(
         wdw, (By.ID, "btFiltrar"), f"Gerar – {label}"
     )
 
+    sleep(1.5)
+    # 3. Verifica alerta de sem dados
+    if SeleniumRequester.verificar_sem_dados(driver, wdw):
+        logger.info("Sem registros → %s (pulando)", label)
+        return False
+
+    # 4. Aguarda o arquivo aparecer na pasta temp (sabidamente vazia)
     arquivo = requester.aguardar_download(extensao=".xlsx")
+
+    # 5. Move para o destino final com nomenclatura correta
+    destino = pasta_brutos(slug_cc) / f"{label}.xlsx"
     shutil.move(str(arquivo), str(destino))
     logger.info("Salvo → %s", destino.relative_to(BASE_OUTPUT_DIR))
+    return True
 
 
 def baixar_par(
-    wdw: WebDriverWait,
-    requester: SeleniumRequester,
-    slug_cc: str,
-    periodo_aamm: str,   # ex: "202509"
+        driver,
+        wdw: WebDriverWait,
+        requester: SeleniumRequester,
+        slug_cc: str,
+        periodo_aamm: str,  # ex: "202509"
 ) -> None:
     """
     Baixa Sintético e Analítico do período já preenchido.
-    O label é montado aqui, garantindo que sintetico e analitico
-    usem sempre o mesmo AAAAMM — sem depender da ordem de execução.
+    Se o sintético não tiver registros, pula o analítico também
+    (ambos compartilham os mesmos filtros — se um está vazio, o outro também estará).
     """
     label_sin = f"{slug_cc}_{periodo_aamm}_sintetico"
     label_ana = f"{slug_cc}_{periodo_aamm}_analitico"
 
-    # Sintético (checkbox desmarcado = analitico)
+    # analitico (checkbox desmarcado = analitico)
     _toggle_sintetico(wdw, ativar=False)
-    _gerar_e_salvar(wdw, requester, slug_cc, label_ana)
+    teve_dados = _gerar_e_salvar(driver, wdw, requester, slug_cc, label_ana)
     sleep(1)
 
-    # Analítico (checkbox marcado = sintetico)
+    if not teve_dados:
+        # Sem dados no sintético → analítico também estará vazio; pula o par inteiro
+        return
+
+    # sintetico (checkbox marcado = sintetico)
     _toggle_sintetico(wdw, ativar=True)
-    _gerar_e_salvar(wdw, requester, slug_cc, label_sin)
+    _gerar_e_salvar(driver, wdw, requester, slug_cc, label_sin)
     sleep(1)
 
     _toggle_sintetico(wdw, ativar=False)  # deixa desmarcado para próxima iteração
@@ -339,10 +381,10 @@ def baixar_par(
 # ── Fluxo principal por centro de custo ──────────────────────────────────────
 
 def processar_centro(
-    driver,
-    wdw: WebDriverWait,
-    requester: SeleniumRequester,
-    centro: dict,
+        driver,
+        wdw: WebDriverWait,
+        requester: SeleniumRequester,
+        centro: dict,
 ) -> None:
     nome_cc = str(centro["centro_custo"]).strip()
     slug_cc = nome_cc.lower().replace(" ", "_").replace("-", "")[:40]
@@ -371,32 +413,94 @@ def processar_centro(
         periodo_aamm = ini.strftime("%Y%m")
         logger.info("  ↳ %s → %s", fmt(ini), fmt(fim))
         atualizar_periodo(wdw, ini, fim)
-        baixar_par(wdw, requester, slug_cc, periodo_aamm)
+        baixar_par(driver, wdw, requester, slug_cc, periodo_aamm)
 
 
 # ── Entrypoint ────────────────────────────────────────────────────────────────
 
 def main() -> None:
     centros = carregar_centros_ativos()
-    logger.info("%d centros de custo ativos carregados", len(centros))
 
-    requester = SeleniumRequester(download_dir=BASE_OUTPUT_DIR / "_temp_downloads")
-    driver    = requester.get_driver()
-    wdw       = requester.waiter(driver)
+    logger.info(
+        "%d centros de custo ativos carregados",
+        len(centros)
+    )
 
-    try:
-        SeleniumRequester.navegacao_inicial(driver, wdw)
+    requester = SeleniumRequester(
+        download_dir=BASE_OUTPUT_DIR / "_temp_downloads"
+    )
 
-        for centro in centros:
-            try:
-                processar_centro(driver, wdw, requester, centro)
-            except Exception:
-                logger.exception("Erro no centro '%s' — reiniciando driver", centro.get("centro_custo"))
-                driver, wdw = requester.reiniciar_driver(driver, REPORT_URL)
+    for i, centro in enumerate(centros, start=1):
 
-    finally:
-        driver.quit()
-        logger.info("Concluído. Arquivos em: %s", BASE_OUTPUT_DIR)
+        driver = None
+
+        try:
+
+            logger.info(
+                "────────────────────────────────────────────"
+            )
+
+            logger.info(
+                "[%d/%d] Iniciando centro: %s",
+                i,
+                len(centros),
+                centro.get("centro_custo"),
+            )
+
+            # ─────────────────────────────────────────
+            # NOVO DRIVER
+            # ─────────────────────────────────────────
+            driver = requester.get_driver()
+
+            wdw = requester.waiter(driver)
+
+            SeleniumRequester.navegacao_inicial(
+                driver,
+                wdw
+            )
+
+            processar_centro(
+                driver,
+                wdw,
+                requester,
+                centro
+            )
+
+            logger.info(
+                "[%s] Finalizado com sucesso",
+                centro.get("centro_custo"),
+            )
+
+        except Exception:
+
+            logger.exception(
+                "Erro no centro '%s'",
+                centro.get("centro_custo")
+            )
+
+        finally:
+
+            # ─────────────────────────────────────────
+            # SEMPRE FECHA O NAVEGADOR
+            # ─────────────────────────────────────────
+            if driver:
+
+                try:
+                    driver.quit()
+
+                    logger.info(
+                        "Driver encerrado"
+                    )
+
+                except Exception:
+                    pass
+
+                sleep(2)
+
+    logger.info(
+        "Concluído. Arquivos em: %s",
+        BASE_OUTPUT_DIR
+    )
 
 
 if __name__ == "__main__":
