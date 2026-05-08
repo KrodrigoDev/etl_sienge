@@ -204,7 +204,7 @@ def baixar_relatorio_iframe(
     driver.switch_to.default_content()
 
     # Entra no iframe padrão
-    _entrar_iframe(driver)
+    req.entrar_iframe(driver)
 
     logger.info("Clicando no botão de gerar relatório...")
     req.aguardar_e_clicar(
@@ -267,7 +267,7 @@ def extrair_usuario(
         sleep(2)
 
         # ── 3. Entra no iframe e preenche filtros fixos ──────────────────────
-        _entrar_iframe(driver)
+        req.entrar_iframe(driver)
 
         # ── 4. Clica em "Consultar" ───────────────────────────────────────────
         logger.info("Clicando em Consultar...")

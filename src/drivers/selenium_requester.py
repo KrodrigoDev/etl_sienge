@@ -223,13 +223,7 @@ class SeleniumRequester:
             f"verifique a pasta {self.download_dir}"
         )
 
-    @staticmethod
-    def entrar_iframe(wdw: WebDriverWait, nome_iframe: str):
-        wdw.until(
-            EC.frame_to_be_available_and_switch_to_it(
-                (By.NAME, nome_iframe)
-            )
-        )
+
 
     @staticmethod
     def selecionar_opcao_combobox(
@@ -485,3 +479,10 @@ class SeleniumRequester:
             return False
 
         return False
+
+    @staticmethod
+    def entrar_iframe(driver) -> None:
+        logger.info("Entrando no iframe do formulário")
+        driver.switch_to.default_content()
+        frame = driver.find_element(By.ID, "iFramePage")
+        driver.switch_to.frame(frame)
