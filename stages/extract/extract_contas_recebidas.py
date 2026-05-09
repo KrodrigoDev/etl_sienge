@@ -1,5 +1,5 @@
 """
-stages/rpa/extract_contas_recebidas.py
+stages/extract/extract_contas_recebidas.py
 ---------------------------------------
 RPA – Relatório de Contas Recebidas (Sintético + Analítico)
 
@@ -53,11 +53,11 @@ CONDICOES_SIGLAS = [
 
 AUXILIAR_PATH = (
         Path(__file__).resolve().parents[2]
-        / "stages" / "rpa" / "files" / "reference" / "auxiliar.xlsx"
+        / "stages" / "extract" / "reference" / "auxiliar_contas_recebidas.xlsx"
 )
 BASE_OUTPUT_DIR = (
         Path(__file__).resolve().parents[2]
-        / "stages" / "rpa" / "files" / "output" / "contas_recebidas"
+        / "stages" / "transform" / "input" / "contas_recebidas"
 )
 
 

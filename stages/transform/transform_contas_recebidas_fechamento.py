@@ -58,15 +58,22 @@ logger = logging.getLogger(__name__)
 
 AUXILIAR_PATH = (
         Path(__file__).resolve().parents[2]
-        / "stages" / "rpa" / "files" / "reference" / "auxiliar.xlsx"
+        / "stages" / "extract" / "reference" / "auxiliar_contas_recebidas.xlsx"
 )
+
+BASE_INPUT_DIR = (
+        Path(__file__).resolve().parents[2]
+        / "stages" / "transform" / "input" / "contas_recebidas"
+)
+
 BASE_OUTPUT_DIR = (
         Path(__file__).resolve().parents[2]
-        / "stages" / "rpa" / "files" / "output" / "contas_recebidas"
+        / "stages" / "transform" / "output" / "contas_recebidas"
 )
+
 EXTRATO_PATH = (
         Path(__file__).resolve().parents[2]
-        / "stages" / "rpa" / "files" / "reference" / "extrato_empreendimentos.xls"
+        / "stages" / "extract" / "reference" / "extrato_empreendimentos.xls" # isso é retirado da caixa e todos os meses deve ser solicitado
 )
 
 # ── Estilos ───────────────────────────────────────────────────────────────────
@@ -643,7 +650,7 @@ def transformar_centro(centro: dict, novos: set[str]) -> dict:
     pct = float(centro.get("pct_repasse") or 0)
     _, _, colunas_num = _layout(centro)
 
-    dir_brutos = BASE_OUTPUT_DIR / slug_cc / "dados_brutos"
+    dir_brutos = BASE_INPUT_DIR / slug_cc / "dados_brutos"
     dir_consol = BASE_OUTPUT_DIR / slug_cc / "dados_consolidados"
     dir_consol.mkdir(parents=True, exist_ok=True)
 
