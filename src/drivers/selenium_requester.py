@@ -62,10 +62,10 @@ class SeleniumRequester:
         options.add_argument("--profile-directory=Default")
 
         # ── Headless (crítico para Agendador de Tarefas) ──────────────────────────
-        options.add_argument("--headless=new")
-        options.add_argument("--window-size=1920,1080")  # sem isso headless fica 0x0
-        options.add_argument("--disable-gpu")
-        options.add_argument("--disable-software-rasterizer")
+        # options.add_argument("--headless=new")
+        # options.add_argument("--window-size=1920,1080")  # sem isso headless fica 0x0
+        # options.add_argument("--disable-gpu")
+        # options.add_argument("--disable-software-rasterizer")
 
         # ── Estabilidade ──────────────────────────────────────────────────────────
         options.add_argument("--no-sandbox")
@@ -223,13 +223,7 @@ class SeleniumRequester:
             f"verifique a pasta {self.download_dir}"
         )
 
-    @staticmethod
-    def entrar_iframe(wdw: WebDriverWait, nome_iframe: str):
-        wdw.until(
-            EC.frame_to_be_available_and_switch_to_it(
-                (By.NAME, nome_iframe)
-            )
-        )
+
 
     @staticmethod
     def selecionar_opcao_combobox(
@@ -380,7 +374,8 @@ class SeleniumRequester:
         )
 
     @staticmethod
-    def fechar_popup_novidade(wdw: WebDriverWait) -> None:
+    def fechar_popup_novidade(wdw: WebDriverWait,
+                              txt_locator='//div[@role="dialog"]//button[normalize-space()="Fechar"]') -> None:
         """
         Fecha o popup de "novidade" do SIENGE caso ele apareça após a navegação.
 
@@ -393,7 +388,7 @@ class SeleniumRequester:
         """
         locator_fechar = (
             By.XPATH,
-            '//div[@role="dialog"]//button[normalize-space()="Fechar"]',
+            txt_locator,
         )
 
         try:
@@ -484,3 +479,10 @@ class SeleniumRequester:
             return False
 
         return False
+
+    @staticmethod
+    def entrar_iframe(driver) -> None:
+        logger.info("Entrando no iframe do formulário")
+        driver.switch_to.default_content()
+        frame = driver.find_element(By.ID, "iFramePage")
+        driver.switch_to.frame(frame)

@@ -103,16 +103,12 @@ def extrair_titulo(
                     arquivo_final = destino / nome_final
 
                     if arquivo_final.exists():
-                        baixado_hoje = (
-                                date.fromtimestamp(arquivo_final.stat().st_mtime)
-                                == date.today()
-                        )
+
                         ano_fechado = ano < ano_atual
-                        if ano_fechado or baixado_hoje:
-                            motivo = "ano fechado" if ano_fechado else "já baixado hoje"
+                        if ano_fechado:
                             logger.info(
                                 "  Pulando empresa %s ano %s (%s)",
-                                cod_empresa, ano, motivo,
+                                cod_empresa, ano, "ano fechado",
                             )
                             continue
 
