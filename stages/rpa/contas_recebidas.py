@@ -351,14 +351,16 @@ def baixar_par(
         requester: SeleniumRequester,
         slug_cc: str,
         periodo_aamm: str,  # ex: "202509"
+        tipo_coluna: str, # retirar esse
+        com_centro: str # retirar esse
 ) -> None:
     """
     Baixa Sintético e Analítico do período já preenchido.
     Se o sintético não tiver registros, pula o analítico também
     (ambos compartilham os mesmos filtros — se um está vazio, o outro também estará).
     """
-    label_sin = f"{slug_cc}_{periodo_aamm}_sintetico"
-    label_ana = f"{slug_cc}_{periodo_aamm}_analitico"
+    label_sin = f"{slug_cc}_{tipo_coluna}_{com_centro}_{periodo_aamm}_sintetico"
+    label_ana = f"{slug_cc}_{tipo_coluna}_{com_centro}_{periodo_aamm}_analitico"
 
     # analitico (checkbox desmarcado = analitico)
     _toggle_sintetico(wdw, ativar=False)
@@ -387,6 +389,8 @@ def processar_centro(
         centro: dict,
 ) -> None:
     nome_cc = str(centro["centro_custo"]).strip()
+    tipo_coluna = str(centro["tipo_coluna"]).strip()
+    com_centro = str(centro["com_centro"]).strip()
     slug_cc = nome_cc.lower().replace(" ", "_").replace("-", "")[:40]
 
     inicio_liberacao = parse_data(centro.get("inicio_liberacao"))
@@ -413,7 +417,7 @@ def processar_centro(
         periodo_aamm = ini.strftime("%Y%m")
         logger.info("  ↳ %s → %s", fmt(ini), fmt(fim))
         atualizar_periodo(wdw, ini, fim)
-        baixar_par(driver, wdw, requester, slug_cc, periodo_aamm)
+        baixar_par(driver, wdw, requester, slug_cc, periodo_aamm, tipo_coluna, com_centro)
 
 
 # ── Entrypoint ────────────────────────────────────────────────────────────────

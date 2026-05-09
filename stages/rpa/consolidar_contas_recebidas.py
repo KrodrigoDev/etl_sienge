@@ -102,18 +102,20 @@ def _eh_rodape(valor) -> bool:
     return v.startswith(RODAPE_PREFIXOS) or bool(_RE_TIMESTAMP.match(v))
 
 
-def _inicio_dados(caminho: Path) -> int:
+def _inicio_dados(com_centro: str) -> int:
     """
-    Detecta automaticamente a linha onde começam os dados.
-    Com empresa: linha 10 (índice 10).
-    Sem empresa: linha 9 (índice 9).
-    Critério: se a célula A10 for NaN ou rodapé, usa 9.
+    Define a linha inicial dos dados conforme o layout do relatório.
+
+    com_centro = "sim"
+        → relatório possui empresa/centro
+        → dados iniciam na linha 10
+
+    com_centro = "nao"
+        → relatório agregado
+        → dados iniciam na linha 9
     """
-    df_raw = pd.read_excel(caminho, sheet_name="Relatório", header=None, nrows=12)
-    val_10 = str(df_raw.iloc[10, 0]).strip() if len(df_raw) > 10 else ""
-    if not val_10 or val_10 == "nan" or _eh_rodape(val_10):
-        return 9
-    return 10
+
+    return 10 if com_centro.strip().lower() == "sim" else 9
 
 
 # ── Extrato de empreendimentos ────────────────────────────────────────────────
@@ -234,7 +236,7 @@ def ler_sintetico(caminho: Path, novos: set[str], centro: dict) -> pd.DataFrame:
 
     df_raw = pd.read_excel(caminho, sheet_name="Relatório", header=None)
     periodo = extrair_periodo(df_raw)
-    inicio = _inicio_dados(caminho)
+    inicio = _inicio_dados(centro.get("com_centro"))
 
     dados = df_raw.iloc[inicio:][list(cols_sin.keys())].copy()
     dados.columns = list(cols_sin.values())
@@ -263,7 +265,7 @@ def ler_analitico(caminho: Path, novos: set[str], centro: dict) -> pd.DataFrame:
 
     df_raw = pd.read_excel(caminho, sheet_name="Relatório", header=None)
     periodo = extrair_periodo(df_raw)
-    inicio = _inicio_dados(caminho)
+    inicio = _inicio_dados(centro.get("com_centro"))
 
     dados = df_raw.iloc[inicio:][list(cols_ana.keys())].copy()
     dados.columns = list(cols_ana.values())
@@ -341,7 +343,7 @@ def transformar_centro_sintetico(centro: dict, novos: set[str]) -> None:
     consolidado = consolidado.sort_values("cliente").reset_index(drop=True)
 
     destino = dir_consol / f"{slug_cc}_consolidado_sintetico.xlsx"
-    _salvar_sintetico(consolidado, destino, nome_cc, pct)
+    _salvar_sintetico(consolidado, destino, nome_cc, pct, centro)
     logger.info("[%s] Sintético salvo → %s", nome_cc, destino.name)
 
 
@@ -376,31 +378,59 @@ def transformar_centro_analitico(centro: dict, novos: set[str]) -> None:
     consolidado = consolidado.sort_values(["cliente", "dt_baixa"]).reset_index(drop=True)
 
     destino = dir_consol / f"{slug_cc}_consolidado_analitico.xlsx"
-    _salvar_analitico(consolidado, destino, nome_cc, pct)
+    _salvar_analitico(consolidado, destino, nome_cc, pct, centro)
     logger.info("[%s] Analítico salvo → %s", nome_cc, destino.name)
 
 
 # ── Geração Excel – Sintético ─────────────────────────────────────────────────
 
-def _salvar_sintetico(df: pd.DataFrame, destino: Path, nome_cc: str, pct: float) -> None:
+def _salvar_sintetico(
+        df: pd.DataFrame,
+        destino: Path,
+        nome_cc: str,
+        pct: float,
+        centro: dict,
+) -> None:
     wb = Workbook()
     ws = wb.active
     ws.title = "Consolidado"
 
-    cabecalhos = [
-        "Cliente", "Novo?", "Amortização", "Juros", "Correção",
-        "Acréscimo", "Seguro", "Taxa adm", "Desconto", "Líquido",
-        "% Repasse", "Vlr. Líq. Repasse",
-    ]
-    colunas_df = [
-        "cliente", "novo_cliente", "amortizacao", "juros", "correcao",
-        "acrescimo", "seguro", "taxa_adm", "desconto", "liquido",
-        "pct_repasse", "valor_liquido_repasse",
-    ]
+    cols_sin, _, colunas_num = _layout(centro)
+
+    # ── Layout dinâmico ──────────────────────────────────────────────────────
+    possui_juros = "juros" in colunas_num
+
+    cabecalhos = ["Cliente", "Novo?"]
+    colunas_df = ["cliente", "novo_cliente"]
+
+    if possui_juros:
+        cabecalhos += [
+            "Amortização", "Juros", "Correção",
+            "Acréscimo", "Seguro", "Taxa adm",
+            "Desconto", "Líquido",
+        ]
+        colunas_df += [
+            "amortizacao", "juros", "correcao",
+            "acrescimo", "seguro", "taxa_adm",
+            "desconto", "liquido",
+        ]
+    else:
+        cabecalhos += [
+            "Vl. Baixa", "Acréscimo", "Seguro",
+            "Taxa adm", "Desconto", "Líquido",
+        ]
+        colunas_df += [
+            "vl_baixa", "acrescimo", "seguro",
+            "taxa_adm", "desconto", "liquido",
+        ]
+
+    cabecalhos += ["% Repasse", "Vlr. Líq. Repasse"]
+    colunas_df += ["pct_repasse", "valor_liquido_repasse"]
+
     n_cols = len(cabecalhos)
     span = f"A1:{get_column_letter(n_cols)}1"
 
-    # Título
+    # ── Título ───────────────────────────────────────────────────────────────
     ws.merge_cells(span)
     ws["A1"] = f"Contas Recebidas – {nome_cc}"
     ws["A1"].font = Font(bold=True, size=12, color="FFFFFF")
@@ -408,7 +438,7 @@ def _salvar_sintetico(df: pd.DataFrame, destino: Path, nome_cc: str, pct: float)
     ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[1].height = 22
 
-    # Metadados
+    # ── Metadados ────────────────────────────────────────────────────────────
     ws.merge_cells(f"A2:{get_column_letter(n_cols)}2")
     ws["A2"] = (
         f"% de repasse: {pct:.2%}   |   "
@@ -419,100 +449,177 @@ def _salvar_sintetico(df: pd.DataFrame, destino: Path, nome_cc: str, pct: float)
     ws["A2"].font = Font(italic=True, size=10, color="595959")
     ws["A2"].alignment = Alignment(horizontal="left", vertical="center")
 
-    # Cabeçalhos
+    # ── Cabeçalhos ───────────────────────────────────────────────────────────
     for ci, cab in enumerate(cabecalhos, 1):
         c = ws.cell(row=3, column=ci, value=cab)
         c.font = _HDR_FONT
         c.fill = _HDR_FILL
         c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         c.border = _BORDA
+
     ws.row_dimensions[3].height = 30
 
-    colunas_valor = {"amortizacao", "juros", "correcao", "acrescimo",
-                     "seguro", "taxa_adm", "desconto", "liquido", "valor_liquido_repasse"}
+    colunas_valor = set(colunas_num + ["valor_liquido_repasse"])
 
-    # Dados
+    # ── Dados ────────────────────────────────────────────────────────────────
     for ri, row in enumerate(df.itertuples(index=False), 4):
+
         e_novo = getattr(row, "novo_cliente") == "S"
-        fill = _NOVO_FILL if e_novo else (_ALT_FILL if ri % 2 == 0 else PatternFill())
+
+        fill = (
+            _NOVO_FILL
+            if e_novo
+            else (_ALT_FILL if ri % 2 == 0 else PatternFill())
+        )
+
         for ci, col in enumerate(colunas_df, 1):
+
             val = getattr(row, col)
+
             cell = ws.cell(row=ri, column=ci, value=val)
+
             cell.border = _BORDA
             cell.fill = fill
             cell.font = Font(size=10)
+
             if col == "cliente":
                 cell.alignment = Alignment(horizontal="left")
+
             elif col == "novo_cliente":
                 cell.alignment = Alignment(horizontal="center")
+
                 if e_novo:
                     cell.font = Font(size=10, bold=True, color="7F6000")
+
             elif col == "pct_repasse":
                 cell.number_format = "0.00%"
                 cell.alignment = Alignment(horizontal="center")
+
             elif col in colunas_valor:
                 cell.number_format = "#,##0.00"
                 cell.alignment = Alignment(horizontal="right")
 
-    # Totais
+    # ── Totais ───────────────────────────────────────────────────────────────
     tr = len(df) + 4
+
     tot_font = Font(bold=True, color="FFFFFF", size=10)
+
     for ci in range(1, n_cols + 1):
         c = ws.cell(row=tr, column=ci)
-        c.fill = _TOTAL_FILL;
-        c.font = tot_font;
+        c.fill = _TOTAL_FILL
+        c.font = tot_font
         c.border = _BORDA
 
     ws.cell(row=tr, column=1, value="TOTAL").alignment = Alignment(horizontal="center")
-    for ci, col in {3: "amortizacao", 4: "juros", 5: "correcao", 6: "acrescimo",
-                    7: "seguro", 8: "taxa_adm", 9: "desconto", 10: "liquido",
-                    12: "valor_liquido_repasse"}.items():
-        c = ws.cell(row=tr, column=ci, value=df[col].sum())
-        c.number_format = "#,##0.00"
-        c.alignment = Alignment(horizontal="right")
-    c_pct = ws.cell(row=tr, column=11, value=pct)
-    c_pct.number_format = "0.00%"
-    c_pct.alignment = Alignment(horizontal="center")
 
-    # Larguras
-    for i, w in enumerate([42, 8, 14, 10, 10, 12, 10, 10, 10, 14, 12, 18], 1):
-        ws.column_dimensions[get_column_letter(i)].width = w
+    for ci, col in enumerate(colunas_df, 1):
+
+        if col in colunas_valor:
+
+            c = ws.cell(row=tr, column=ci, value=df[col].sum())
+            c.number_format = "#,##0.00"
+            c.alignment = Alignment(horizontal="right")
+
+        elif col == "pct_repasse":
+
+            c = ws.cell(row=tr, column=ci, value=pct)
+            c.number_format = "0.00%"
+            c.alignment = Alignment(horizontal="center")
+
+    # ── Larguras ─────────────────────────────────────────────────────────────
+    larguras = {
+        "cliente": 42,
+        "novo_cliente": 8,
+        "pct_repasse": 12,
+        "valor_liquido_repasse": 18,
+    }
+
+    for col in colunas_num:
+        larguras[col] = 14
+
+    for i, col in enumerate(colunas_df, 1):
+        ws.column_dimensions[get_column_letter(i)].width = larguras.get(col, 12)
 
     ws.freeze_panes = "A4"
+
     wb.save(destino)
 
 
 # ── Geração Excel – Analítico ─────────────────────────────────────────────────
 
-def _salvar_analitico(df: pd.DataFrame, destino: Path, nome_cc: str, pct: float) -> None:
+def _salvar_analitico(
+        df: pd.DataFrame,
+        destino: Path,
+        nome_cc: str,
+        pct: float,
+        centro: dict,
+) -> None:
     wb = Workbook()
     ws = wb.active
     ws.title = "Analítico"
 
+    _, cols_ana, colunas_num = _layout(centro)
+
+    possui_juros = "juros" in colunas_num
+
     cabecalhos = [
-        "Dt. Baixa", "Cliente", "Novo?", "Documento", "Título", "Parcela", "TC",
-        "Unidade", "Portador", "Operação", "Vencimento",
-        "Amortização", "Juros", "Correção", "Acréscimo", "Seguro", "Taxa Adm",
-        "Desconto", "Líquido", "% Repasse", "Vlr. Líq. Repasse",
+        "Dt. Baixa", "Cliente", "Novo?", "Documento", "Título",
+        "Parcela", "TC", "Unidade", "Portador", "Operação",
+        "Vencimento",
     ]
+
     colunas_df = [
-        "dt_baixa", "cliente", "novo_cliente", "documento", "titulo", "parcela", "tc",
-        "unidade_principal", "portador", "operacao", "data_vencimento",
-        "amortizacao", "juros", "correcao", "acrescimo", "seguro", "taxa_adm",
-        "desconto", "liquido", "pct_repasse", "valor_liquido_repasse",
+        "dt_baixa", "cliente", "novo_cliente", "documento", "titulo",
+        "parcela", "tc", "unidade_principal", "portador",
+        "operacao", "data_vencimento",
     ]
+
+    if possui_juros:
+
+        cabecalhos += [
+            "Amortização", "Juros", "Correção",
+            "Acréscimo", "Seguro", "Taxa Adm",
+            "Desconto", "Líquido",
+        ]
+
+        colunas_df += [
+            "amortizacao", "juros", "correcao",
+            "acrescimo", "seguro", "taxa_adm",
+            "desconto", "liquido",
+        ]
+
+    else:
+
+        cabecalhos += [
+            "Vl. Baixa", "Acréscimo", "Seguro",
+            "Taxa Adm", "Desconto", "Líquido",
+        ]
+
+        colunas_df += [
+            "vl_baixa", "acrescimo", "seguro",
+            "taxa_adm", "desconto", "liquido",
+        ]
+
+    cabecalhos += ["% Repasse", "Vlr. Líq. Repasse"]
+
+    colunas_df += ["pct_repasse", "valor_liquido_repasse"]
+
     n_cols = len(cabecalhos)
 
-    # Título
+    # ── Título ───────────────────────────────────────────────────────────────
     ws.merge_cells(f"A1:{get_column_letter(n_cols)}1")
+
     ws["A1"] = f"Contas Recebidas Analítico – {nome_cc}"
+
     ws["A1"].font = Font(bold=True, size=12, color="FFFFFF")
     ws["A1"].fill = _TITLE_FILL
     ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+
     ws.row_dimensions[1].height = 22
 
-    # Metadados
+    # ── Metadados ────────────────────────────────────────────────────────────
     ws.merge_cells(f"A2:{get_column_letter(n_cols)}2")
+
     ws["A2"] = (
         f"% de repasse: {pct:.2%}   |   "
         f"Registros: {len(df)}   |   "
@@ -520,104 +627,182 @@ def _salvar_analitico(df: pd.DataFrame, destino: Path, nome_cc: str, pct: float)
         f"Novos clientes (CRI mês ant.): {(df['novo_cliente'] == 'S').sum()}   |   "
         f"Gerado em: {pd.Timestamp.now().strftime('%d/%m/%Y %H:%M')}"
     )
+
     ws["A2"].font = Font(italic=True, size=10, color="595959")
     ws["A2"].alignment = Alignment(horizontal="left", vertical="center")
 
-    # Cabeçalhos
+    # ── Cabeçalhos ───────────────────────────────────────────────────────────
     for ci, cab in enumerate(cabecalhos, 1):
         c = ws.cell(row=3, column=ci, value=cab)
+
         c.font = _HDR_FONT
         c.fill = _HDR_FILL
         c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         c.border = _BORDA
+
     ws.row_dimensions[3].height = 30
 
-    colunas_valor = {"amortizacao", "juros", "correcao", "acrescimo", "seguro",
-                     "taxa_adm", "desconto", "liquido", "valor_liquido_repasse"}
+    colunas_valor = set(colunas_num + ["valor_liquido_repasse"])
+
     colunas_data = {"dt_baixa", "data_vencimento"}
 
-    # Dados + subtotal por cliente
+    # ── Dados + subtotal ────────────────────────────────────────────────────
     ri = 4
+
     for cliente, grupo in df.groupby("cliente", sort=True):
+
         e_novo = (grupo["novo_cliente"] == "S").any()
-        fill_base = _NOVO_FILL if e_novo else None  # None → alterna por linha
 
         for row in grupo.itertuples(index=False):
-            fill = _NOVO_FILL if e_novo else (_ALT_FILL if ri % 2 == 0 else PatternFill())
+
+            fill = (
+                _NOVO_FILL
+                if e_novo
+                else (_ALT_FILL if ri % 2 == 0 else PatternFill())
+            )
+
             for ci, col in enumerate(colunas_df, 1):
+
                 val = getattr(row, col)
+
                 cell = ws.cell(row=ri, column=ci, value=val)
+
                 cell.border = _BORDA
                 cell.fill = fill
                 cell.font = Font(size=10)
+
                 if col in colunas_data:
+
                     cell.number_format = "dd/mm/yyyy"
                     cell.alignment = Alignment(horizontal="center")
+
                 elif col == "pct_repasse":
+
                     cell.number_format = "0.00%"
                     cell.alignment = Alignment(horizontal="center")
+
                 elif col in colunas_valor:
+
                     cell.number_format = "#,##0.00"
                     cell.alignment = Alignment(horizontal="right")
+
                 elif col == "cliente":
+
                     cell.alignment = Alignment(horizontal="left")
+
                 elif col == "novo_cliente":
+
                     cell.alignment = Alignment(horizontal="center")
+
                     if e_novo:
                         cell.font = Font(size=10, bold=True, color="7F6000")
+
                 else:
                     cell.alignment = Alignment(horizontal="center")
+
             ri += 1
 
-        # ── Subtotal do cliente ───────────────────────────────────────────────
-        subtot_font = Font(bold=True, size=10,
-                           color="7F6000" if e_novo else "1F4E79")
+        # ── Subtotal ────────────────────────────────────────────────────────
+        subtot_font = Font(
+            bold=True,
+            size=10,
+            color="7F6000" if e_novo else "1F4E79",
+        )
+
         for ci in range(1, n_cols + 1):
             c = ws.cell(row=ri, column=ci)
+
             c.fill = _SUBTOT_FILL
             c.font = subtot_font
             c.border = _BORDA
 
-        # Label do subtotal (coluna "Cliente")
-        ws.cell(row=ri, column=2, value=f"Subtotal – {cliente}").alignment = \
-            Alignment(horizontal="left")
-        ws.cell(row=ri, column=3, value="S" if e_novo else "N").alignment = \
-            Alignment(horizontal="center")
+        ws.cell(
+            row=ri,
+            column=2,
+            value=f"Subtotal – {cliente}",
+        ).alignment = Alignment(horizontal="left")
 
-        soma_cols = {12: "amortizacao", 13: "juros", 14: "correcao", 15: "acrescimo",
-                     16: "seguro", 17: "taxa_adm", 18: "desconto", 19: "liquido",
-                     21: "valor_liquido_repasse"}
-        for ci, col in soma_cols.items():
-            c = ws.cell(row=ri, column=ci, value=grupo[col].sum())
-            c.number_format = "#,##0.00"
-            c.alignment = Alignment(horizontal="right")
-        ws.cell(row=ri, column=20, value=pct).number_format = "0.00%"
+        ws.cell(
+            row=ri,
+            column=3,
+            value="S" if e_novo else "N",
+        ).alignment = Alignment(horizontal="center")
+
+        for ci, col in enumerate(colunas_df, 1):
+
+            if col in colunas_valor:
+
+                c = ws.cell(row=ri, column=ci, value=grupo[col].sum())
+
+                c.number_format = "#,##0.00"
+                c.alignment = Alignment(horizontal="right")
+
+            elif col == "pct_repasse":
+
+                c = ws.cell(row=ri, column=ci, value=pct)
+
+                c.number_format = "0.00%"
+                c.alignment = Alignment(horizontal="center")
+
         ri += 1
 
-    # ── Total geral ───────────────────────────────────────────────────────────
+    # ── Total geral ──────────────────────────────────────────────────────────
     tot_font = Font(bold=True, color="FFFFFF", size=10)
+
     for ci in range(1, n_cols + 1):
         c = ws.cell(row=ri, column=ci)
-        c.fill = _TOTAL_FILL;
-        c.font = tot_font;
+
+        c.fill = _TOTAL_FILL
+        c.font = tot_font
         c.border = _BORDA
 
-    ws.cell(row=ri, column=1, value="TOTAL GERAL").alignment = \
-        Alignment(horizontal="center")
-    for ci, col in {12: "amortizacao", 13: "juros", 14: "correcao", 15: "acrescimo",
-                    16: "seguro", 17: "taxa_adm", 18: "desconto", 19: "liquido",
-                    21: "valor_liquido_repasse"}.items():
-        c = ws.cell(row=ri, column=ci, value=df[col].sum())
-        c.number_format = "#,##0.00"
-        c.alignment = Alignment(horizontal="right")
-    ws.cell(row=ri, column=20, value=pct).number_format = "0.00%"
+    ws.cell(
+        row=ri,
+        column=1,
+        value="TOTAL GERAL",
+    ).alignment = Alignment(horizontal="center")
 
-    # Larguras
-    for i, w in enumerate([12, 40, 7, 16, 14, 10, 8, 14, 12, 12, 12,
-                           14, 12, 12, 12, 10, 12, 12, 14, 12, 18], 1):
-        ws.column_dimensions[get_column_letter(i)].width = w
+    for ci, col in enumerate(colunas_df, 1):
+
+        if col in colunas_valor:
+
+            c = ws.cell(row=ri, column=ci, value=df[col].sum())
+
+            c.number_format = "#,##0.00"
+            c.alignment = Alignment(horizontal="right")
+
+        elif col == "pct_repasse":
+
+            c = ws.cell(row=ri, column=ci, value=pct)
+
+            c.number_format = "0.00%"
+            c.alignment = Alignment(horizontal="center")
+
+    # ── Larguras ─────────────────────────────────────────────────────────────
+    larguras = {
+        "dt_baixa": 12,
+        "cliente": 40,
+        "novo_cliente": 7,
+        "documento": 16,
+        "titulo": 14,
+        "parcela": 10,
+        "tc": 8,
+        "unidade_principal": 14,
+        "portador": 12,
+        "operacao": 12,
+        "data_vencimento": 12,
+        "pct_repasse": 12,
+        "valor_liquido_repasse": 18,
+    }
+
+    for col in colunas_num:
+        larguras[col] = 14
+
+    for i, col in enumerate(colunas_df, 1):
+        ws.column_dimensions[get_column_letter(i)].width = larguras.get(col, 12)
 
     ws.freeze_panes = "A4"
+
     wb.save(destino)
 
 
