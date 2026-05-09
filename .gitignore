@@ -43,6 +43,9 @@ stages/transform/output/
 stages/rpa/files/input/
 stages/rpa/files/output/
 
+
+stages/rpa/files/reference/extrato_empreendimentos.xls
+
 # =========================
 # Jupyter (se usar)
 # =========================
