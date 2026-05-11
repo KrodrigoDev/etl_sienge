@@ -276,7 +276,7 @@ def _linha_total(ws, ri: int, n_cols: int, label: str,
 
 def carregar_centros_ativos() -> list[dict]:
     df = pd.read_excel(AUXILIAR_PATH, sheet_name="centros_custo")
-    df = df[df["ativo"].str.strip().str.lower() == "sim"]
+    # df = df[df["ativo"].str.strip().str.lower() == "sim"]
     return df.to_dict(orient="records")
 
 
@@ -760,76 +760,11 @@ def _gerar_consolidado_geral(resultados: list[dict]) -> None:
         [c for c in ["centro_custo", "cliente", "dt_baixa"] if c in df.columns]
     ).reset_index(drop=True)
 
-    ts = pd.Timestamp.now().strftime("%Y%m%d_%H%M")
-    destino = BASE_OUTPUT_DIR / f"consolidado_geral_analitico_{ts}.xlsx"
+    df["data_carga"] = df.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Analítico"
+    destino = BASE_OUTPUT_DIR / f"consolidado_geral_analitico.csv"
 
-    colunas_valor = {"amortizacao", "juros", "correcao", "acrescimo", "seguro",
-                     "taxa_adm", "desconto", "liquido", "vl_baixa",
-                     "pct_repasse", "valor_liquido_repasse"}
-    colunas_data = {"dt_baixa", "data_vencimento"}
-
-    cabecalhos_map = {
-        "centro_custo": "Centro de Custo", "periodo": "Período",
-        "dt_baixa": "Dt. Baixa", "cliente": "Cliente", "novo_cliente": "Novo?",
-        "documento": "Documento", "titulo": "Título", "parcela": "Parcela",
-        "tc": "TC", "unidade_principal": "Unidade", "portador": "Portador",
-        "operacao": "Operação", "data_vencimento": "Vencimento",
-        "dt_emissao": "Dt. Emissão", "vl_baixa": "Vl. Baixa",
-        "amortizacao": "Amortização", "juros": "Juros", "correcao": "Correção",
-        "acrescimo": "Acréscimo", "seguro": "Seguro", "taxa_adm": "Taxa Adm",
-        "desconto": "Desconto", "liquido": "Líquido",
-        "pct_repasse": "% Repasse", "valor_liquido_repasse": "Vlr. Líq. Repasse",
-    }
-
-    cols = df.columns.tolist()
-    for ci, col in enumerate(cols, 1):
-        c = ws.cell(row=1, column=ci, value=cabecalhos_map.get(col, col))
-        c.font = _HDR_FONT;
-        c.fill = _HDR_FILL;
-        c.border = _BORDA
-        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    ws.row_dimensions[1].height = 28
-
-    for ri, row in enumerate(df.itertuples(index=False), 2):
-        fill = _ALT_FILL if ri % 2 == 0 else PatternFill()
-        for ci, col in enumerate(cols, 1):
-            val = getattr(row, col)
-            cell = ws.cell(row=ri, column=ci, value=val)
-            cell.fill = fill;
-            cell.border = _BORDA;
-            cell.font = Font(size=10)
-            if col in colunas_data:
-                cell.number_format = "dd/mm/yyyy"
-                cell.alignment = Alignment(horizontal="center")
-            elif col == "pct_repasse":
-                cell.number_format = "0.00%"
-                cell.alignment = Alignment(horizontal="center")
-            elif col in colunas_valor:
-                cell.number_format = "#,##0.00"
-                cell.alignment = Alignment(horizontal="right")
-            elif col in ("cliente", "centro_custo"):
-                cell.alignment = Alignment(horizontal="left")
-            else:
-                cell.alignment = Alignment(horizontal="center")
-
-    larguras = {
-        "centro_custo": 30, "periodo": 10, "dt_baixa": 12, "cliente": 40,
-        "novo_cliente": 7, "documento": 16, "titulo": 14, "parcela": 10,
-        "tc": 8, "unidade_principal": 14, "portador": 12, "operacao": 12,
-        "data_vencimento": 12, "dt_emissao": 12, "vl_baixa": 14,
-        "amortizacao": 14, "juros": 12, "correcao": 12, "acrescimo": 12,
-        "seguro": 10, "taxa_adm": 12, "desconto": 12, "liquido": 14,
-        "pct_repasse": 12, "valor_liquido_repasse": 18,
-    }
-    for i, col in enumerate(cols, 1):
-        ws.column_dimensions[get_column_letter(i)].width = larguras.get(col, 12)
-
-    ws.freeze_panes = "A2"
-    wb.save(destino)
+    df.to_csv(destino, sep=';', decimal=',')
     logger.info("Consolidado geral → %s  (%d linhas, %d centros)",
                 destino.name, len(df), len(frames))
 
@@ -855,7 +790,6 @@ def _imprimir_resumo(resultados: list[dict]) -> None:
         print(f"• Total líquido do mês fechado: *R$ {total_liquido:,.2f}*")
         print(f"• Percentual de repasse: *{pct_repasse:.2%}*")
         print(f"• Valor líquido de repasse: *R$ {total_mes_repasse_ana:,.2f}*")
-        # esse Valor líquido de repasse e total líquido, além do percentual que deve ser ajustado não está considerando a série histórica dos novos clientes que entraram no mês anterior
 
         print("—" * 40)
 
