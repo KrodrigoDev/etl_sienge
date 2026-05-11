@@ -17,10 +17,12 @@ Nomenclatura dos arquivos brutos:
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 from datetime import date, timedelta
 from pathlib import Path
 from time import sleep
+import sys
 
 import pandas as pd
 from dateutil.relativedelta import relativedelta
@@ -31,10 +33,16 @@ from selenium.webdriver.support.wait import WebDriverWait
 
 from src.drivers.selenium_requester import SeleniumRequester
 
+ROOT = Path(__file__).resolve().parents[2]
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%H:%M:%S",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler(ROOT / "logs" / "contas_recebidas.log", encoding="utf-8"),
+    ]
 )
 logger = logging.getLogger(__name__)
 
@@ -69,10 +77,10 @@ def pasta_brutos(slug_cc: str) -> Path:
     return p
 
 
-def pasta_consolidados(slug_cc: str) -> Path:
-    p = BASE_OUTPUT_DIR / slug_cc / "dados_consolidados"
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+# def pasta_consolidados(slug_cc: str) -> Path:
+#     p = BASE_OUTPUT_DIR / slug_cc / "dados_consolidados"
+#     p.mkdir(parents=True, exist_ok=True)
+#     return p
 
 
 # ── Helpers de data ───────────────────────────────────────────────────────────
@@ -120,6 +128,41 @@ def parse_data(val) -> date | None:
         return pd.to_datetime(val).date()
     except Exception:
         return None
+
+
+# ── Detecção de progresso anterior ────────────────────────────────────────────
+
+_RE_PERIODO = re.compile(r'_(\d{6})_(sintetico|analitico)\.xlsx$')
+
+
+def ultimo_periodo_completo(slug_cc: str) -> str | None:
+    """
+    Varre dados_brutos/ e retorna o AAAAMM do último mês onde AMBOS
+    sintetico E analitico existem em disco.
+
+    Retorna None se nenhum par completo encontrado (primeiro run).
+
+    Usado para retomar o download a partir do mês com falha — evita
+    rebaixar toda a série histórica. O último par completo é incluído
+    no reprocessamento para garantir que pares incompletos (onde apenas
+    um dos dois foi baixado) também sejam refeitos.
+    """
+    brutos = BASE_OUTPUT_DIR / slug_cc / "dados_brutos"
+    if not brutos.exists():
+        return None
+
+    periodos: dict[str, set] = {}
+    for f in brutos.iterdir():
+        m = _RE_PERIODO.search(f.name)
+        if m:
+            aamm, tipo = m.group(1), m.group(2)
+            periodos.setdefault(aamm, set()).add(tipo)
+
+    completos = sorted(
+        aamm for aamm, tipos in periodos.items()
+        if {"sintetico", "analitico"}.issubset(tipos)
+    )
+    return completos[-1] if completos else None
 
 
 # ── Helper genérico de lupa (botProcurar) ────────────────────────────────────
@@ -351,16 +394,14 @@ def baixar_par(
         requester: SeleniumRequester,
         slug_cc: str,
         periodo_aamm: str,  # ex: "202509"
-        tipo_coluna: str, # retirar esse
-        com_centro: str # retirar esse
 ) -> None:
     """
     Baixa Sintético e Analítico do período já preenchido.
     Se o sintético não tiver registros, pula o analítico também
     (ambos compartilham os mesmos filtros — se um está vazio, o outro também estará).
     """
-    label_sin = f"{slug_cc}_{tipo_coluna}_{com_centro}_{periodo_aamm}_sintetico"
-    label_ana = f"{slug_cc}_{tipo_coluna}_{com_centro}_{periodo_aamm}_analitico"
+    label_sin = f"{slug_cc}_serie_historica_ate_{periodo_aamm}_sintetico"
+    label_ana = f"{slug_cc}_serie_historica_ate_{periodo_aamm}_analitico"
 
     # analitico (checkbox desmarcado = analitico)
     _toggle_sintetico(wdw, ativar=False)
@@ -376,7 +417,7 @@ def baixar_par(
     _gerar_e_salvar(driver, wdw, requester, slug_cc, label_sin)
     sleep(1)
 
-    _toggle_sintetico(wdw, ativar=False)  # deixa desmarcado para próxima iteração
+    # _toggle_sintetico(wdw, ativar=False)  # deixa desmarcado para próxima iteração
     sleep(0.5)
 
 
@@ -389,86 +430,83 @@ def processar_centro(
         centro: dict,
 ) -> None:
     nome_cc = str(centro["centro_custo"]).strip()
-    tipo_coluna = str(centro["tipo_coluna"]).strip()
-    com_centro = str(centro["com_centro"]).strip()
     slug_cc = nome_cc.lower().replace(" ", "_").replace("-", "")[:40]
 
-    inicio_liberacao = parse_data(centro.get("inicio_liberacao"))
-    if not inicio_liberacao:
-        logger.warning("[%s] inicio_liberacao não definido — pulando", nome_cc)
-        return
+    # inicio_liberacao = parse_data(centro.get("inicio_liberacao"))
+    # if not inicio_liberacao:
+    #     logger.warning("[%s] inicio_liberacao não definido — pulando", nome_cc)
+    #     return
 
-    fim_ultimo_mes = fim_de_mes(mes_anterior_ao_vigente())
-    periodos = meses_no_intervalo(inicio_liberacao, fim_ultimo_mes)
 
-    logger.info("[%s] %d mês(es) a baixar  |  %s → %s",
-                nome_cc, len(periodos), fmt(periodos[0][0]), fmt(periodos[-1][1]))
+    # todos_periodos = meses_no_intervalo(inicio_liberacao, fim_ultimo_mes)
+
+    # Retoma a partir do último par completo encontrado em disco.
+    # Se o mês M falhou, o último par *completo* será M-1,
+    # então M é incluído no reprocessamento.
+    # ultimo_ok = ultimo_periodo_completo(slug_cc)
+    # if ultimo_ok:
+    #     periodos = [
+    #         (ini, fim) for ini, fim in todos_periodos
+    #         if ini.strftime("%Y%m") >= ultimo_ok
+    #     ]
+    #     pulados = len(todos_periodos) - len(periodos)
+    #     if pulados:
+    #         logger.info(
+    #             "[%s] Retomando do %s — %d mês(es) já baixado(s) pulados",
+    #             nome_cc, ultimo_ok, pulados,
+    #         )
+    # else:
+    #     periodos = todos_periodos
+
+    # if not periodos:
+    #     logger.info("[%s] Todos os meses já baixados — nada a fazer", nome_cc)
+    #     return
+    #
+    # logger.info("[%s] %d mês(es) a baixar  |  %s → %s",
+    #             nome_cc, len(periodos), fmt(periodos[0][0]), fmt(periodos[-1][1]))
 
     # Garante estrutura de pastas para este centro
     pasta_brutos(slug_cc)
-    pasta_consolidados(slug_cc)
+    # pasta_consolidados(slug_cc)
 
     # Filtros fixos: uma única vez
     abrir_relatorio(driver, wdw)
     preencher_filtros_fixos(driver, wdw, centro)
 
     # Loop de meses: só altera período e baixa
-    for ini, fim in periodos:
-        periodo_aamm = ini.strftime("%Y%m")
-        logger.info("  ↳ %s → %s", fmt(ini), fmt(fim))
-        atualizar_periodo(wdw, ini, fim)
-        baixar_par(driver, wdw, requester, slug_cc, periodo_aamm, tipo_coluna, com_centro)
+    # for ini, fim in periodos:
+    fim_ultimo_mes = fim_de_mes(mes_anterior_ao_vigente())
+    periodo_aamm = fim_ultimo_mes.strftime("%Y%m")
+    # logger.info("  ↳ %s → %s", fmt(ini), fmt(fim))
+    atualizar_periodo(wdw, date(day=1, month=1, year=2000), fim_ultimo_mes)
+
+    baixar_par(driver, wdw, requester, slug_cc, periodo_aamm)
 
 
 # ── Entrypoint ────────────────────────────────────────────────────────────────
 
+
 def main() -> None:
     centros = carregar_centros_ativos()
+    logger.info("%d centros de custo ativos carregados", len(centros))
 
-    logger.info(
-        "%d centros de custo ativos carregados",
-        len(centros)
-    )
-
-    requester = SeleniumRequester(
-        download_dir=BASE_OUTPUT_DIR / "_temp_downloads"
-    )
+    requester = SeleniumRequester(download_dir=BASE_OUTPUT_DIR / "_temp_downloads")
 
     for i, centro in enumerate(centros, start=1):
-
         driver = None
-
         try:
-
+            logger.info("────────────────────────────────────────────")
             logger.info(
-                "────────────────────────────────────────────"
+                "[%d/%d] Iniciando: %s",
+                i, len(centros), centro.get("centro_custo"),
             )
 
-            logger.info(
-                "[%d/%d] Iniciando centro: %s",
-                i,
-                len(centros),
-                centro.get("centro_custo"),
-            )
-
-            # ─────────────────────────────────────────
-            # NOVO DRIVER
-            # ─────────────────────────────────────────
+            # Novo driver por centro — sessão sempre limpa, sem estado anterior
             driver = requester.get_driver()
-
             wdw = requester.waiter(driver)
+            SeleniumRequester.navegacao_inicial(driver, wdw)
 
-            SeleniumRequester.navegacao_inicial(
-                driver,
-                wdw
-            )
-
-            processar_centro(
-                driver,
-                wdw,
-                requester,
-                centro
-            )
+            processar_centro(driver, wdw, requester, centro)
 
             logger.info(
                 "[%s] Finalizado com sucesso",
@@ -476,35 +514,22 @@ def main() -> None:
             )
 
         except Exception:
-
             logger.exception(
                 "Erro no centro '%s'",
-                centro.get("centro_custo")
+                centro.get("centro_custo"),
             )
 
         finally:
-
-            # ─────────────────────────────────────────
-            # SEMPRE FECHA O NAVEGADOR
-            # ─────────────────────────────────────────
+            # Fecha o driver independentemente de sucesso ou erro
             if driver:
-
                 try:
                     driver.quit()
-
-                    logger.info(
-                        "Driver encerrado"
-                    )
-
+                    logger.info("Driver encerrado")
                 except Exception:
                     pass
-
                 sleep(2)
 
-    logger.info(
-        "Concluído. Arquivos em: %s",
-        BASE_OUTPUT_DIR
-    )
+    logger.info("Concluído. Arquivos em: %s", BASE_OUTPUT_DIR)
 
 
 if __name__ == "__main__":
