@@ -32,6 +32,7 @@ import re
 
 from datetime import date, timedelta, datetime
 from pathlib import Path
+import locale
 
 import pandas as pd
 import numpy as np
@@ -437,7 +438,10 @@ def ler_vgv_clientes() -> pd.DataFrame:
     df = pd.read_excel('../extract/reference/vgv_clientes.xlsx', decimal=',')
     df.dropna(subset='id título', inplace=True)
     df['id título'] = pd.to_numeric(df['id título'], errors='coerce')
-    return df[['id título', 'VGV Vendido']]
+
+    df.rename(columns={'id título': 'titulo', 'Cliente': 'cliente'}, inplace=True)
+
+    return df[['titulo', 'VGV Vendido', 'cliente']]
 
 
 def ler_contas_a_receber() -> pd.DataFrame:
@@ -498,11 +502,16 @@ def ler_contas_a_receber() -> pd.DataFrame:
     )
 
     df_vgv = ler_vgv_clientes()
-    dados["titulo"] = pd.to_numeric(dados["titulo"], errors="coerce")
-    df_vgv["id título"] = pd.to_numeric(df_vgv["id título"], errors="coerce")
 
-    dados = dados.merge(df_vgv, how="left", left_on="titulo", right_on="id título")
-    dados.drop(columns=["id título"], inplace=True)
+    dados["titulo"] = pd.to_numeric(dados["titulo"], errors="coerce")
+    df_vgv["titulo"] = pd.to_numeric(df_vgv["titulo"], errors="coerce")
+
+
+    dados = dados.merge(df_vgv, how="outer", left_on="titulo", right_on="titulo")
+
+    dados["cliente"] = dados["cliente_x"].combine_first(dados["cliente_y"])
+    dados.drop(columns=["cliente_x", "cliente_y"], inplace=True)
+
     dados.rename(columns={"VGV Vendido": "vgv_vendido"}, inplace=True)
 
     return dados.reset_index(drop=True)
@@ -845,6 +854,8 @@ def _salvar_acompanhamento(
     )
     df_pivot = df_pivot.merge(cr, on="titulo", how="left")
 
+    df_pivot = df_pivot.dropna(subset=['vgv_vendido']).reset_index(drop=True) # isso faz com que os clientes com contratos com distrato saiam
+
     # ── 4. Métricas derivadas ─────────────────────────────────────────────────
     df_pivot["contrato_total"] = (
             df_pivot["valor_liquido_total"] + df_pivot["carteira_total"].fillna(0)
@@ -938,7 +949,7 @@ def _salvar_acompanhamento(
     ws.row_dimensions[ROW_HDR].height = 20
 
     # ── Dados ─────────────────────────────────────────────────────────────────
-    colunas_valor_set = set(pivot_cols + depois_validas)
+    colunas_valor_set = set(pivot_cols + depois_validas + ['vgv_vendido', 'total_por_cliente'])
     ri = ROW_HDR + 1
 
     for idx_linha, row in enumerate(df_pivot.itertuples(index=False)):
@@ -1147,19 +1158,48 @@ def _adicionar_fechamento_analitico(wb: Workbook, df: pd.DataFrame,
 # ORQUESTRADOR PRINCIPAL
 # ═════════════════════════════════════════════════════════════════════════════
 
-def transformar_centro(centro: dict, novos: set[str], contas_a_receber) -> dict:
+def _obter_competencia():
+    """
+    Retorna informações padronizadas da competência atual.
+    """
+
+    # Linux / Mac
+    try:
+        locale.setlocale(locale.LC_TIME, "pt_BR.UTF-8")
+
+    # Windows
+    except:
+        try:
+            locale.setlocale(locale.LC_TIME, "Portuguese_Brazil.1252")
+        except:
+            pass
+
+    hoje = datetime.now()
+
+    competencia_dt = hoje - relativedelta(months=1)
+
+    return {
+        "ano": str(competencia_dt.year),
+        "mes_ref": competencia_dt.strftime("%m. %B").capitalize(),
+        "competencia": competencia_dt.strftime("%m.%Y"),
+    }
+
+def transformar_centro(centro: dict, novos: set[str], contas_a_receber, comp: dict) -> dict:
+
     nome_cc = str(centro["centro_custo"]).strip()
     slug_cc = _slug(nome_cc)
+    nome_pasta_cc = slug_cc.replace("_", " ").title()
     pct = float(centro.get("pct_repasse") or 0)
     _, _, colunas_num = _layout(centro)
 
     dir_brutos = BASE_INPUT_DIR / slug_cc / "dados_brutos"
-    dir_consol = BASE_OUTPUT_DIR / slug_cc / "dados_consolidados"
+    dir_consol = BASE_OUTPUT_DIR / nome_pasta_cc / comp["ano"] / comp["mes_ref"]
+
     dir_consol.mkdir(parents=True, exist_ok=True)
 
-    destino_sin = dir_consol / f"{slug_cc}_consolidado_sintetico.xlsx"
-    destino_ana = dir_consol / f"{slug_cc}_consolidado_analitico.xlsx"
-    destino_acom = dir_consol / f"{slug_cc}_acompanhamento.xlsx"
+    destino_ana = dir_consol / f"Analítico - {comp['competencia']}.xlsx"
+    destino_sin = dir_consol / f"Sintético - {comp['competencia']}.xlsx"
+    destino_acom = dir_consol / f"Acompanhamento - {comp['competencia']}.xlsx"
 
     resultado = {
         "nome_cc": nome_cc,
@@ -1353,11 +1393,13 @@ def main() -> None:
 
     resultados = []
     contas_a_receber = ler_contas_a_receber()
+
+    comp = _obter_competencia()
     for centro in centros:
         nome_cc = str(centro["centro_custo"]).strip()
         try:
             novos = carregar_extrato(nome_cc)
-            res = transformar_centro(centro, novos, contas_a_receber)
+            res = transformar_centro(centro, novos, contas_a_receber, comp)
             resultados.append(res)
         except Exception:
             logger.exception("Erro em '%s'", nome_cc)
