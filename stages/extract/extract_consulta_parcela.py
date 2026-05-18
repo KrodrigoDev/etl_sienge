@@ -59,7 +59,7 @@ def extrair_consulta_parcela(
         logger.info("Navegando para os serviços...")
 
         driver.get(URL_PAINEL)
-        sleep(2)
+
         req.fechar_popup_novidade(wdw)
 
         # ── 3. Preenche data inicial ──────────────────────────────────────────
@@ -69,7 +69,7 @@ def extrair_consulta_parcela(
             (By.CSS_SELECTOR, 'input[name="dataVencimentoInicial"]'),
             data_inicio,
         )
-        sleep(1.5)
+        sleep(3)
 
         data_final = f'31/12/{date.today().year}'
         logger.info("Preenchendo data final: %s", data_final)
@@ -78,7 +78,7 @@ def extrair_consulta_parcela(
             (By.CSS_SELECTOR, 'input[name="dataVencimentoFinal"]'),
             data_final,
         )
-        sleep(1.5)
+        sleep(3)
 
         # ── 5. Consultar ──────────────────────────────────────────────────────
         logger.info("Consultando...")
@@ -101,7 +101,7 @@ def extrair_consulta_parcela(
             wdw,
             (By.XPATH, '//div[contains(@class,"MuiTablePagination-select")]'),
         )
-        sleep(2)
+        sleep(2.5)
 
         # ── 6. Seleciona '5000' linhas por página ─────────────────────────────
         logger.info("Selecionando 5000 linhas por página...")
@@ -125,7 +125,7 @@ def extrair_consulta_parcela(
         sleep(2)
 
         req.aguardar_carregamento_tabela(driver)
-        sleep(3)  # ← aguarda renderização após carregamento em headless
+        sleep(4)  # ← aguarda renderização após carregamento em headless
 
         pagina = 1
         while True:
@@ -138,7 +138,7 @@ def extrair_consulta_parcela(
                     (By.CSS_SELECTOR, '.MuiDataGrid-row')
                 )
             )
-            sleep(2)  # ← margem extra para renderização completa das linhas
+            sleep(3)  # ← margem extra para renderização completa das linhas
 
             logger.info("Exportando CSV da página %d...", pagina)
             _exportar_csv_modal(wdw)

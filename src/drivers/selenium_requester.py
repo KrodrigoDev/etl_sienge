@@ -62,10 +62,10 @@ class SeleniumRequester:
         options.add_argument("--profile-directory=Default")
 
         # ── Headless (crítico para Agendador de Tarefas) ──────────────────────────
-        # options.add_argument("--headless=new")
-        # options.add_argument("--window-size=1920,1080")  # sem isso headless fica 0x0
-        # options.add_argument("--disable-gpu")
-        # options.add_argument("--disable-software-rasterizer")
+        options.add_argument("--headless=new")
+        options.add_argument("--window-size=1920,1080")  # sem isso headless fica 0x0
+        options.add_argument("--disable-gpu")
+        options.add_argument("--disable-software-rasterizer")
 
         # ── Estabilidade ──────────────────────────────────────────────────────────
         options.add_argument("--no-sandbox")
