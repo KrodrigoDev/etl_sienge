@@ -22,9 +22,11 @@ Relacionamentos gerados (todos 1:N, single direction)
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import datetime
 
 import pandas as pd
 import numpy as np
+
 
 from stages.transform.utils.normalizer import (
     checar_integridade,
@@ -267,6 +269,9 @@ def executar(input_dir: Path = INPUT_DIR,
         <= fato_solicitacao_item['lead_time_dias'],
         None  # sem pedido ou sem lead_time: indeterminado
     )
+
+    # Data de carga — rastreia qual extração originou o registro
+    fato_solicitacao_item["data_carga"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     _val_max = fato_solicitacao_item['valor_da_nota'].max()
     print(f"  fato_solicitacao_item: {fato_solicitacao_item.shape}")

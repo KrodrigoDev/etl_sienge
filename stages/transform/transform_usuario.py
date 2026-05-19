@@ -439,9 +439,11 @@ def _ler_permissao_usuario(input_dir: Path) -> pd.DataFrame:
         )
     arquivo = max(arquivos, key=lambda p: p.stat().st_mtime)
     print(f"  Lendo permissões de ação: {arquivo.name}")
+
     df = pd.read_csv(arquivo, sep=";")
     df = df.rename(columns={"Unnamed: 0": "acao"})
     df = df.drop(index=df.loc[df["acao"] == "Todas as ações"].index).reset_index(drop=True)
+
     df_melt = df.melt(id_vars="acao", var_name="usuario", value_name="tem_permissao")
     df_melt["usuario"] = df_melt["usuario"].astype(str).str.strip().str.upper()
     df_melt["tem_permissao"] = (
@@ -707,6 +709,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
 
     # ── 1. Leitura ────────────────────────────────────────────────────────────
     print("\n── 1. Leitura ──────────────────────────────────────────────────────")
+
     df_cad = _ler_cadastro(input_dir)
     df_rel = _ler_relatorio(input_dir)
     df_perm = _ler_permissao_usuario(input_dir)

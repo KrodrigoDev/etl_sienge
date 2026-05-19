@@ -224,6 +224,30 @@ def etapa_extract_titulo() -> tuple[bool, bool]:
     return ok, False  # (sucesso, foi_skip)
 
 
+def etapa_extract_usuario() -> bool:
+    from stages.extract.extract_usuarios import extrair_usuario
+
+    _secao("EXTRACT — Extrair Informações Gerais do Usuário")
+    return _com_retry(
+        nome="extrair_usuario",
+        fn=lambda: extrair_usuario(
+            destino=INPUT_DIR / "usuario",
+        ),
+    )
+
+
+def etapa_extract_permissao_usuario() -> bool:
+    from stages.extract.extract_permissao_usuario_perfil import extrair_permissao_usuario
+
+    _secao("EXTRACT — Extrair Informações Gerais do Usuário")
+    return _com_retry(
+        nome="extrair_usuario",
+        fn=lambda: extrair_permissao_usuario(
+            destino=INPUT_DIR / "usuario",
+        ),
+    )
+
+
 def etapa_extract(data_inicio: str) -> None:
     """Roda todos os extractors na ordem definida."""
     etapa_extract_painel_compras(data_inicio)
@@ -299,6 +323,14 @@ def etapa_transform_titulo() -> None:
     logger.info("Transform Título concluído.")
 
 
+def etapa_transform_usuario() -> None:
+    from stages.transform.transform_usuario import executar
+
+    _secao("TRANSFORM — Usuário")
+    executar(input_dir=INPUT_DIR, output_dir=OUTPUT_DIR)
+    logger.info("Transform usuário concluído.")
+
+
 def etapa_transform() -> None:
     etapa_transform_painel_compras()
     etapa_transform_estoque()
@@ -372,6 +404,34 @@ def painel_suprimentos() -> None:
     etapa_transform_adiantamento()
 
 
+def painel_gestao_usuario() -> None:
+    """
+    Extrai todos os módulos de suprimentos.
+    Só roda os transforms se todos os extracts concluírem com sucesso.
+    """
+    ok_usuario = etapa_extract_usuario()
+
+    falhas = []
+    if not ok_usuario:
+        falhas.append("etapa_extract_usuario")
+
+    etapa_transform_usuario()
+
+    ok_permissao_usuario = etapa_extract_permissao_usuario()
+
+    if not ok_permissao_usuario:
+        falhas.append("etapa_extract_usuario")
+
+    if falhas:
+        _cancelar_transforms(falhas)
+        return
+
+    etapa_transform_usuario()
+
+
+# painel repasse sócios
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # ENTRYPOINT
 # ─────────────────────────────────────────────────────────────────────────────
@@ -396,6 +456,7 @@ _ETAPAS_VALIDAS = [
     "transform_titulo",
     "painel_consultas",
     "painel_suprimentos",
+    "painel_gestao_usuario"
 ]
 
 
@@ -493,6 +554,9 @@ def main() -> None:
 
     elif args.etapa == "painel_suprimentos":
         painel_suprimentos()
+
+    elif args.etapa == "painel_gestao_usuario":
+        painel_gestao_usuario()
 
     logger.info("Pipeline finalizado.")
 
