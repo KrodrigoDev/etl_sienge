@@ -142,12 +142,12 @@ def _faixa_saldo(saldo: pd.Series) -> pd.Series:
     bins = [0, 7000, 15000, 20000, 50000, 100000, float("inf")]
 
     labels = [
-        "Até 7 mil",
-        "7 mil a 15 mil",
-        "15 mil a 20 mil",
-        "20 mil a 50 mil",
-        "50 mil a 100 mil",
-        "Acima de 100 mil"
+        "A. Até 7 mil",
+        "B. 7 mil a 15 mil",
+        "C. 15 mil a 20 mil",
+        "D. 20 mil a 50 mil",
+        "E. 50 mil a 100 mil",
+        "F. Acima de 100 mil"
     ]
 
     return pd.cut(
@@ -603,8 +603,6 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     print("\n── 10.5. Enriquecimento cod_obra / chave_cc ────────────────────────")
 
     # veriricar depois se vau ser necessário especificar as obras
-    DOCS_ESPECIAIS: set[str] = {"A"}
-    # DOCS_ESPECIAIS: set[str] = {"FL", "GI"}
 
     dim_titulo_obra_dedup = pd.read_csv(
         output_dir / "dim_titulo_obra_dedup.csv", sep=";"
@@ -636,7 +634,30 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     #   qualquer outro documento     →  "{cod_obra}"               (chave simples)
     #   cod_obra ausente (sem match) →  NA                         (sem mapeamento)
 
-    _cod_obra_str = fato["cod_obra"].astype("Int64").astype(str)  # "667", "<NA>" etc.
+    dim_conta_cc = pd.read_excel(INPUT_DIR / "reference/dim_conta_cc.xlsx", sheet_name="conta_cc")
+    dim_conta_cc = dim_conta_cc.dropna(subset=["cod_obra"])
+
+    dim_conta_cc['cod_obra'] = dim_conta_cc['cod_obra'].astype(int)
+
+    dim_conta_cc['chave_cc_preview'] = dim_conta_cc.apply(
+        lambda x:
+        str(x['cod_obra']).strip()
+        if pd.isna(x['tipo_documento'])
+        else f"{x['cod_obra']}_{x['tipo_documento']}".strip(),
+        axis=1
+    )
+
+
+    cod_obras_especiais_str = set(
+        dim_conta_cc.loc[~dim_conta_cc['tipo_documento'].isna(), 'cod_obra']
+        .astype(int).astype(str)
+    )
+
+    DOCS_ESPECIAIS: set[str] = {"FL", "TRCT"}
+
+    _cod_obra_str = fato["cod_obra"].apply(
+        lambda x: str(int(x)) if pd.notna(x) else pd.NA
+    )
 
     _doc_upper = fato["documento"].fillna("").str.strip().str.upper()
 
@@ -645,17 +666,17 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     # Linhas com cod_obra presente
     _tem_obra = fato["cod_obra"].notna()
 
-    # Sub-caso: documento especial → chave composta
     _doc_especial = _doc_upper.isin(DOCS_ESPECIAIS)
-    fato.loc[_tem_obra & _doc_especial, "chave_cc"] = (
-            _cod_obra_str[_tem_obra & _doc_especial]
-            + "_"
-            + _doc_upper[_tem_obra & _doc_especial]
-    )
+
+    mask_composta = _tem_obra & _doc_especial & _cod_obra_str.isin(cod_obras_especiais_str)
+    mask_simples = _tem_obra
 
     # Sub-caso: documento comum → chave simples
-    fato.loc[_tem_obra & ~_doc_especial, "chave_cc"] = (
-        _cod_obra_str[_tem_obra & ~_doc_especial]
+    fato.loc[mask_simples, "chave_cc"] = _cod_obra_str[mask_simples]
+
+
+    fato.loc[mask_composta, "chave_cc"] = (
+            _cod_obra_str[mask_composta] + "_" + _doc_upper[mask_composta]
     )
 
     # Flag de qualidade — facilita o card "sem conta mapeada" no BI
@@ -665,7 +686,6 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     n_composta = (_tem_obra & _doc_especial).sum()
     n_simples = (_tem_obra & ~_doc_especial).sum()
     n_sem_obra = (~_tem_obra).sum()
-
 
     # Data de carga — rastreia qual extração originou o registro
     fato["data_carga"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -717,8 +737,10 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     salvar_tabela(dim_tipo_baixa, "dim_tipo_baixa", output_dir)
     salvar_tabela(dim_origem, "dim_origem", output_dir)
     salvar_tabela(dim_forma_pagamento, "dim_forma_pagamento", output_dir)
+    salvar_tabela(dim_conta_cc, "dim_conta_cc", output_dir)
 
     # Fato principal
+
     salvar_tabela(fato, "fato_consulta_parcela", output_dir)
 
     print("\n── Resumo final ────────────────────────────────────────────────────")
@@ -729,6 +751,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         "dim_tipo_baixa": dim_tipo_baixa,
         "dim_origem": dim_origem,
         "dim_forma_pagamento": dim_forma_pagamento,
+        "dim_conta_cc": dim_conta_cc,
         "fato_consulta_parcela": fato,
     }.items():
         print(f"  {nome:<35} {str(tabela.shape):>12}")

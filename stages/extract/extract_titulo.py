@@ -107,8 +107,7 @@ def extrair_titulo(
 
                     if arquivo_final.exists():
 
-                        # ano_fechado = ano < ano_atual
-                        ano_fechado = ano < 2025 # teste para verificar se resolve o problema dos vazios
+                        ano_fechado = ano < ano_atual
                         if ano_fechado:
                             logger.info(
                                 "  Pulando empresa %s ano %s (%s)",
