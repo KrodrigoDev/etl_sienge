@@ -176,8 +176,12 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     df = ler_dados((input_dir / "consulta_parcela").glob("*.csv"))
     df = normalizar_colunas(df)
 
-    print(f"  Total de linhas no começo da fato: {len(df):,}")
-    print(f"  Total de colunas: {len(df.columns)}")
+    print(f"Total de linhas no começo da fato: {len(df):,}")
+    print(f"Total de colunas: {len(df.columns)}")
+
+    print(f'df antes das duplicatas: {df.shape}')
+    df = df.drop_duplicates(subset=['grupo','cod_empresa','documento','cod_credor','titulo']).reset_index(drop=True)
+    print(f'df depois de retirar as duplicatas: {df.shape}')
 
     # ── 2. Conversão de tipos ─────────────────────────────────────────────────
     print("\n── 2. Conversão de tipos ───────────────────────────────────────────")

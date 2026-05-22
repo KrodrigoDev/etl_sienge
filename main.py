@@ -199,6 +199,18 @@ def etapa_extract_consulta_parcela(data_inicio: str) -> bool:
     )
 
 
+def etapa_extract_curva_abc_apropriacao() -> bool:
+    from stages.extract.extract_curva_abc_apropriacao import extrair_curva_abc
+
+    _secao("EXTRACT — CURVA ABC")
+    return _com_retry(
+        nome="extract_consulta_parcela",
+        fn=lambda: extrair_curva_abc(
+            destino=INPUT_DIR / "curva_abc_apropriacao",
+        ),
+    )
+
+
 def etapa_extract_titulo() -> tuple[bool, bool]:
     """
     Executa o extract de títulos com skip automático se já foi rodado hoje.
@@ -331,6 +343,14 @@ def etapa_transform_usuario() -> None:
     logger.info("Transform usuário concluído.")
 
 
+def etapa_transform_curva_abc_apropriacao() -> None:
+    from stages.transform.transform_curva_abc_apropriacao import executar
+
+    _secao("TRANSFORM — Curva ABC")
+    executar(input_dir=INPUT_DIR, output_dir=OUTPUT_DIR)
+    logger.info("Transform Curva ABC concluído.")
+
+
 def etapa_transform() -> None:
     etapa_transform_painel_compras()
     etapa_transform_estoque()
@@ -380,6 +400,7 @@ def painel_suprimentos() -> None:
     ok_servico = etapa_extract_servico("01/01/2014")
     ok_contrato = etapa_extract_contrato("01/01/2014")
     ok_adiantamento = etapa_extract_adiantamento("01/01/2014")
+    ok_curva_abc = etapa_extract_curva_abc_apropriacao()
 
     falhas = []
     if not ok_painel:
@@ -392,6 +413,8 @@ def painel_suprimentos() -> None:
         falhas.append("extract_contrato")
     if not ok_adiantamento:
         falhas.append("extract_adiantamento")
+    if not ok_curva_abc:
+        falhas.append("extract_curva_abc_apropriacao")
 
     if falhas:
         _cancelar_transforms(falhas)
@@ -402,6 +425,7 @@ def painel_suprimentos() -> None:
     etapa_transform_servico()
     etapa_transform_contrato()
     etapa_transform_adiantamento()
+    etapa_transform_curva_abc_apropriacao()
 
 
 def painel_gestao_usuario() -> None:
