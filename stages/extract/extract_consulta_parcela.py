@@ -59,7 +59,7 @@ def extrair_consulta_parcela(
         logger.info("Navegando para os serviços...")
 
         driver.get(URL_PAINEL)
-        sleep(2)
+
         req.fechar_popup_novidade(wdw)
 
         # ── 3. Preenche data inicial ──────────────────────────────────────────
@@ -69,7 +69,7 @@ def extrair_consulta_parcela(
             (By.CSS_SELECTOR, 'input[name="dataVencimentoInicial"]'),
             data_inicio,
         )
-        sleep(1.5)
+        sleep(3)
 
         data_final = f'31/12/{date.today().year}'
         logger.info("Preenchendo data final: %s", data_final)
@@ -78,7 +78,7 @@ def extrair_consulta_parcela(
             (By.CSS_SELECTOR, 'input[name="dataVencimentoFinal"]'),
             data_final,
         )
-        sleep(1.5)
+        sleep(3)
 
         # ── 5. Consultar ──────────────────────────────────────────────────────
         logger.info("Consultando...")
@@ -96,12 +96,11 @@ def extrair_consulta_parcela(
         req.selecionar_todas_colunas(wdw, pagina='serviços')
         sleep(2)
 
-
         req.aguardar_presenca(
             wdw,
             (By.XPATH, '//div[contains(@class,"MuiTablePagination-select")]'),
         )
-        sleep(2)
+        sleep(2.5)
 
         # ── 6. Seleciona '5000' linhas por página ─────────────────────────────
         logger.info("Selecionando 5000 linhas por página...")
@@ -125,34 +124,53 @@ def extrair_consulta_parcela(
         sleep(2)
 
         req.aguardar_carregamento_tabela(driver)
-        sleep(3)  # ← aguarda renderização após carregamento em headless
+        sleep(4)  # ← aguarda renderização após carregamento em headless
 
         pagina = 1
+        MAX_TENTATIVAS_PAGINA = 3
         while True:
 
-            # ── 7. Exporta CSV ────────────────────────────────────────────────
-            # Aguarda que haja pelo menos uma linha de dado na tabela
-            # antes de abrir o modal — evita CSVs vazios em headless
-            wdw.until(
-                EC.presence_of_element_located(
-                    (By.CSS_SELECTOR, '.MuiDataGrid-row')
+            for tentativa in range(1, MAX_TENTATIVAS_PAGINA + 1):
+
+                wdw.until(
+                    EC.presence_of_element_located(
+                        (By.CSS_SELECTOR, '.MuiDataGrid-row')
+                    )
                 )
-            )
-            sleep(2)  # ← margem extra para renderização completa das linhas
+                sleep(3)
 
-            logger.info("Exportando CSV da página %d...", pagina)
-            _exportar_csv_modal(wdw)
+                logger.info(
+                    "Exportando CSV da página %d (tentativa %d/%d)...",
+                    pagina, tentativa, MAX_TENTATIVAS_PAGINA,
+                )
 
-            # ── 8. Aguarda download ───────────────────────────────────────────
-            arquivo_baixado = req.aguardar_download(extensao=".csv")
+                _exportar_csv_modal(wdw)
 
-            # ── 9. Move para pasta de destino ─────────────────────────────────
+                arquivo_baixado = req.aguardar_download(extensao=".csv")
+
+                if arquivo_baixado.stat().st_size > 0:
+                    logger.info("Download válido na tentativa %d.", tentativa)
+                    break
+
+                logger.warning(
+                    "CSV vazio na página %d (tentativa %d/%d) — removendo e tentando novamente...",
+                    pagina, tentativa, MAX_TENTATIVAS_PAGINA,
+                )
+                arquivo_baixado.unlink(missing_ok=True)
+                sleep(5)
+
+            else:
+                raise RuntimeError(
+                    f"Página {pagina} gerou CSV vazio em {MAX_TENTATIVAS_PAGINA} tentativas consecutivas."
+                )
+
+            # ── Move para pasta de destino ─────────────────────────────────
             nome_final = f"consulta_parcela_{pagina}_{date.today().year}.csv"
             arquivo_final = destino / nome_final
             shutil.move(str(arquivo_baixado), str(arquivo_final))
             logger.info("Arquivo salvo em: %s", arquivo_final)
 
-            # ── 10. Verifica se existe próxima página ─────────────────────────
+            # ── Verifica se existe próxima página ──────────────────────────
             try:
                 btn_proxima = driver.find_element(
                     By.XPATH,
@@ -166,7 +184,7 @@ def extrair_consulta_parcela(
                 logger.info("Última página atingida após página %d. Encerrando.", pagina)
                 break
 
-            # ── 11. Vai para a próxima página ─────────────────────────────────
+            # ── Vai para a próxima página ──────────────────────────────────
             logger.info("Avançando para a página %d...", pagina + 1)
             driver.execute_script("arguments[0].click();", btn_proxima)
             pagina += 1

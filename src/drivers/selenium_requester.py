@@ -32,7 +32,9 @@ BASE_URL = "https://telesil.sienge.com.br/sienge"
 LOGIN_URL = f"{BASE_URL}/index.jsp"
 TIMEOUT = 30  # segundos padrão para WebDriverWait
 DL_TIMEOUT = 120  # segundos máximos para aguardar download
+# criar uma lista de perfil para caso em algum eu tenho um erro de uso, tentar o outro (máximo 3)
 
+PERFIS = ['Edge_01', 'Edge_02', 'Edge_03']
 
 class SeleniumRequester:
 
@@ -40,7 +42,7 @@ class SeleniumRequester:
 
         self.project_root = Path(__file__).resolve().parents[2]
 
-        self.path_profile = Path(r"C:\SeleniumPerfil\Edge")
+        self.path_profile = Path(r"C:\SeleniumPerfil\Edge_Novo")
 
         self.download_dir = download_dir or (
                 self.project_root / "stages" / "transform" / "input"
@@ -62,10 +64,10 @@ class SeleniumRequester:
         options.add_argument("--profile-directory=Default")
 
         # ── Headless (crítico para Agendador de Tarefas) ──────────────────────────
-        # options.add_argument("--headless=new")
-        # options.add_argument("--window-size=1920,1080")  # sem isso headless fica 0x0
-        # options.add_argument("--disable-gpu")
-        # options.add_argument("--disable-software-rasterizer")
+        options.add_argument("--headless=new")
+        options.add_argument("--window-size=1920,1080")  # sem isso headless fica 0x0
+        options.add_argument("--disable-gpu")
+        options.add_argument("--disable-software-rasterizer")
 
         # ── Estabilidade ──────────────────────────────────────────────────────────
         options.add_argument("--no-sandbox")
@@ -369,7 +371,7 @@ class SeleniumRequester:
         container = driver.find_element(By.ID, "main")
 
         driver.execute_script(
-            "arguments[0].scrollBy(0, 350)",
+            "arguments[0].scrollBy(0, 400)",
             container
         )
 

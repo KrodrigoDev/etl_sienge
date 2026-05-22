@@ -269,7 +269,17 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     salvar_tabela(dim_insumo, 'dim_insumo', output_dir)
     salvar_tabela(dim_grupo_insumo, 'dim_grupo_insumo', output_dir)
 
-    # Novo fato
+    # Fato incremental — mantém histórico por data_carga
+    # Upsert por data: remove a carga de hoje (se existir) e concatena a nova
+    caminho_fato = output_dir / 'fato_estoque.csv'
+    hoje = date.today().isoformat()
+
+    if caminho_fato.exists():
+        df_historico = pd.read_csv(caminho_fato, sep=';')
+        df_historico = df_historico[df_historico['data_carga'] != hoje]
+        fato_estoque = pd.concat([df_historico, fato_estoque], ignore_index=True)
+        print(f"  Histórico preservado: {df_historico['data_carga'].nunique()} data(s) anterior(es)")
+
     salvar_tabela(fato_estoque, 'fato_estoque', output_dir)
 
     print("\n── Resumo ──────────────────────────────────────────────────────────")

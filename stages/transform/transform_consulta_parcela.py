@@ -139,13 +139,15 @@ def _faixa_atraso(dias: pd.Series) -> pd.Series:
 def _faixa_saldo(saldo: pd.Series) -> pd.Series:
     """Categoriza valores de saldo em faixas para uso em visuais de BI."""
 
-    bins = [0, 20000, 50000, 100000, float("inf")]
+    bins = [0, 7000, 15000, 20000, 50000, 100000, float("inf")]
 
     labels = [
-        "Até 20 mil",
-        "20 mil a 50 mil",
-        "50 mil a 100 mil",
-        "Acima de 100 mil"
+        "A. Até 7 mil",
+        "B. 7 mil a 15 mil",
+        "C. 15 mil a 20 mil",
+        "D. 20 mil a 50 mil",
+        "E. 50 mil a 100 mil",
+        "F. Acima de 100 mil"
     ]
 
     return pd.cut(
@@ -173,7 +175,6 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
 
     df = ler_dados((input_dir / "consulta_parcela").glob("*.csv"))
     df = normalizar_colunas(df)
-
 
     print(f"  Total de linhas no começo da fato: {len(df):,}")
     print(f"  Total de colunas: {len(df.columns)}")
@@ -259,13 +260,21 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
 
     # Próximo dia útil de um vencimento em FDS
     # Sábado (+2) → Segunda | Domingo (+1) → Segunda
-    df["proximo_util_apos_fds"] = df["data_vencimento"].where(
-        ~df["flag_venc_fds"]
-    ).fillna(
-        df["data_vencimento"] + pd.to_timedelta(
-            df["data_vencimento"].dt.dayofweek.map({5: 2, 6: 1}).fillna(0).astype(int),
-            unit="D"
-        )
+    # Próxima segunda-feira após o vencimento
+    dias_ajuste = (
+        df["data_vencimento"]
+        .dt.dayofweek
+        .map({
+            5: 2,  # sábado → segunda
+            6: 1  # domingo → segunda
+        })
+        .fillna(0)
+        .astype(int)
+    )
+
+    df["proximo_util_apos_fds"] = (
+            df["data_vencimento"]
+            + pd.to_timedelta(dias_ajuste, unit="D")
     )
 
     # Parcela venceu no FDS E o próximo útil é hoje → tratar como "vence hoje"
@@ -277,6 +286,18 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
 
     df["flag_venceu_ontem"] = (
             df["data_vencimento"].dt.normalize() == data_ontem
+    )
+
+    df["flag_operacao_hoje"] = (
+            df["flag_vence_hoje"]
+            | (
+                    df["flag_venc_fds"]
+                    & (
+                            df["proximo_util_apos_fds"].dt.normalize()
+                            == data_hoje.normalize()
+                    )
+                    & ~df["flag_paga"]
+            )
     )
 
     df["faixa_atraso"] = _faixa_atraso(df["dias_de_atraso"]).astype(str)
@@ -490,6 +511,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         print(f"  {col_id:<22} {matched:,} / {total:,}  ({matched / total:.1%})")
 
     # ── 10. Montar fato_consulta_parcela ──────────────────────────────────────
+
     print("\n── 10. fato_consulta_parcela ───────────────────────────────────────")
 
     fato = df[[
@@ -552,6 +574,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         "proximo_util_apos_fds",
         "flag_venc_fds_paga_hoje",
         "flag_venceu_ontem",
+        "flag_operacao_hoje",
 
         # ── Atributos de workflow / auditoria ─────────────────────
         "ciencia_do_titulo",
@@ -576,6 +599,94 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
 
     ]].copy()
 
+    # ── 10.5 Enriquecimento com cod_obra via dim_titulo_obra_dedup ───────────
+    print("\n── 10.5. Enriquecimento cod_obra / chave_cc ────────────────────────")
+
+    # veriricar depois se vau ser necessário especificar as obras
+
+    dim_titulo_obra_dedup = pd.read_csv(
+        output_dir / "dim_titulo_obra_dedup.csv", sep=";"
+    )
+
+    _dedup_join = (
+        dim_titulo_obra_dedup[["titulo", "cod_obra", "obra"]]
+        .drop_duplicates(subset="titulo")  # dedup já garante, mas por segurança
+        .copy()
+    )
+
+    _dedup_join["titulo"] = (
+        pd.to_numeric(_dedup_join["titulo"], errors="coerce").astype("Int64")
+    )
+    _dedup_join["cod_obra"] = (
+        pd.to_numeric(_dedup_join["cod_obra"], errors="coerce").astype("Int64")
+    )
+
+    fato = fato.merge(
+        _dedup_join,
+        on="titulo",
+        how="left",
+        suffixes=("", "_dedup"),  # evita colisão caso 'obra' já exista na fato
+    )
+
+    # ── Geração da chave_cc ───────────────────────────────────────────────────
+    # Regra:
+    #   documento em DOCS_ESPECIAIS  →  "{cod_obra}_{documento}"   (chave composta)
+    #   qualquer outro documento     →  "{cod_obra}"               (chave simples)
+    #   cod_obra ausente (sem match) →  NA                         (sem mapeamento)
+
+    dim_conta_cc = pd.read_excel(INPUT_DIR / "reference/dim_conta_cc.xlsx", sheet_name="conta_cc")
+    dim_conta_cc = dim_conta_cc.dropna(subset=["cod_obra"])
+
+    dim_conta_cc['cod_obra'] = dim_conta_cc['cod_obra'].astype(int)
+
+    dim_conta_cc['chave_cc_preview'] = dim_conta_cc.apply(
+        lambda x:
+        str(x['cod_obra']).strip()
+        if pd.isna(x['tipo_documento'])
+        else f"{x['cod_obra']}_{x['tipo_documento']}".strip(),
+        axis=1
+    )
+
+
+    cod_obras_especiais_str = set(
+        dim_conta_cc.loc[~dim_conta_cc['tipo_documento'].isna(), 'cod_obra']
+        .astype(int).astype(str)
+    )
+
+    DOCS_ESPECIAIS: set[str] = {"FL", "TRCT"}
+
+    _cod_obra_str = fato["cod_obra"].apply(
+        lambda x: str(int(x)) if pd.notna(x) else pd.NA
+    )
+
+    _doc_upper = fato["documento"].fillna("").str.strip().str.upper()
+
+    fato["chave_cc"] = pd.NA  # inicializa como NA
+
+    # Linhas com cod_obra presente
+    _tem_obra = fato["cod_obra"].notna()
+
+    _doc_especial = _doc_upper.isin(DOCS_ESPECIAIS)
+
+    mask_composta = _tem_obra & _doc_especial & _cod_obra_str.isin(cod_obras_especiais_str)
+    mask_simples = _tem_obra
+
+    # Sub-caso: documento comum → chave simples
+    fato.loc[mask_simples, "chave_cc"] = _cod_obra_str[mask_simples]
+
+
+    fato.loc[mask_composta, "chave_cc"] = (
+            _cod_obra_str[mask_composta] + "_" + _doc_upper[mask_composta]
+    )
+
+    # Flag de qualidade — facilita o card "sem conta mapeada" no BI
+    fato["flag_sem_conta_mapeada"] = fato["chave_cc"].isna()
+
+    n_com_obra = _tem_obra.sum()
+    n_composta = (_tem_obra & _doc_especial).sum()
+    n_simples = (_tem_obra & ~_doc_especial).sum()
+    n_sem_obra = (~_tem_obra).sum()
+
     # Data de carga — rastreia qual extração originou o registro
     fato["data_carga"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -587,6 +698,12 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
           f"R$ {fato.loc[fato['flag_vencida'], 'saldo_em_aberto'].sum():,.2f}")
     print(f"  Vencem hoje:         {fato['flag_vence_hoje'].sum():,}")
     print(f"  Critico (≥15d):      {fato['flag_critico'].sum():,}")
+
+    print(f"  Parcelas com cod_obra:          {n_com_obra:,}  ({n_com_obra / len(fato):.1%})")
+    print(f"    → chave composta (doc esp.):  {n_composta:,}")
+    print(f"    → chave simples  (demais):    {n_simples:,}")
+    print(f"  Parcelas sem cod_obra (NA):     {n_sem_obra:,}  ({n_sem_obra / len(fato):.1%})")
+    print(f"  flag_sem_conta_mapeada=True:    {fato['flag_sem_conta_mapeada'].sum():,}")
 
     # ── 11. Validação de integridade ──────────────────────────────────────────
     print("\n── 11. Validação ───────────────────────────────────────────────────")
@@ -620,8 +737,10 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     salvar_tabela(dim_tipo_baixa, "dim_tipo_baixa", output_dir)
     salvar_tabela(dim_origem, "dim_origem", output_dir)
     salvar_tabela(dim_forma_pagamento, "dim_forma_pagamento", output_dir)
+    salvar_tabela(dim_conta_cc, "dim_conta_cc", output_dir)
 
     # Fato principal
+
     salvar_tabela(fato, "fato_consulta_parcela", output_dir)
 
     print("\n── Resumo final ────────────────────────────────────────────────────")
@@ -632,6 +751,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         "dim_tipo_baixa": dim_tipo_baixa,
         "dim_origem": dim_origem,
         "dim_forma_pagamento": dim_forma_pagamento,
+        "dim_conta_cc": dim_conta_cc,
         "fato_consulta_parcela": fato,
     }.items():
         print(f"  {nome:<35} {str(tabela.shape):>12}")

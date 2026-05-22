@@ -80,6 +80,10 @@ def extrair_titulo(
 
         janela_principal = driver.current_window_handle
 
+        ano_atual = date.today().year
+
+        limite_pesquisa = ano_atual + 1
+
         # ── 5. Loop por empresa ──────────────────────────────────────────────
         for cod_empresa in lista_empresas:
             logger.info("Empresa: %s", cod_empresa)
@@ -95,8 +99,7 @@ def extrair_titulo(
                 input_empresa.send_keys(Keys.ENTER)
                 sleep(0.5)
 
-                for ano in range(2022, date.today().year + 1):
-                    ano_atual = date.today().year
+                for ano in range(2022, limite_pesquisa):
 
                     # ── Skip ─────────────────────────────────────────────────
                     nome_final = f"relatorio-{cod_empresa}-{ano}.xlsx"

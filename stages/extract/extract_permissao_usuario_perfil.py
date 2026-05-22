@@ -169,7 +169,12 @@ def extrair_permissao_usuario(
         # permissões por usuário
 
         # ── 3. Preenchendo o nome de cada usuário ──────────────────────────────
-        df_usuario = pd.read_csv('../transform/output/dim_usuario.csv', sep=';')
+        base_output = (
+                Path(__file__).resolve().parents[2]
+                / "stages" / "transform" / "output"
+        )
+
+        df_usuario = pd.read_csv( base_output / 'dim_usuario.csv', sep=';')
         nomes_usuarios = df_usuario['nome'].unique().tolist()
 
         logger.info("Total de usuários a serem buscados: %s", len(nomes_usuarios))
