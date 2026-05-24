@@ -16,6 +16,7 @@ import logging
 from pathlib import Path
 import subprocess
 from time import sleep, time
+from datetime import datetime
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -32,8 +33,8 @@ BASE_URL = "https://telesil.sienge.com.br/sienge"
 LOGIN_URL = f"{BASE_URL}/index.jsp"
 TIMEOUT = 30  # segundos padrão para WebDriverWait
 DL_TIMEOUT = 120  # segundos máximos para aguardar download
-# criar uma lista de perfil para caso em algum eu tenho um erro de uso, tentar o outro (máximo 3)
 
+# criar uma lista de perfil para caso em algum eu tenho um erro de uso, tentar o outro (máximo 3)
 PERFIS = ['Edge_01', 'Edge_02', 'Edge_03']
 
 class SeleniumRequester:
@@ -488,3 +489,33 @@ class SeleniumRequester:
         driver.switch_to.default_content()
         frame = driver.find_element(By.ID, "iFramePage")
         driver.switch_to.frame(frame)
+
+    @staticmethod
+    def salvar_screenshot_debug(driver, prefixo: str = "debug") -> Path:
+        """
+        Salva um screenshot da tela atual do driver para auxiliar no diagnóstico
+        de problemas em execuções headless (ex: via Agendador de Tarefas).
+
+        Uso recomendado em qualquer ponto crítico do fluxo:
+            salvar_screenshot_debug(driver, destino, prefixo="apos_login")
+            salvar_screenshot_debug(driver, destino, prefixo="antes_consultar")
+
+        Parameters
+        ----------
+        driver  : WebDriver já iniciado
+        prefixo : rótulo que aparece no nome do arquivo (evitar espaços)
+
+        Returns
+        -------
+        Path do arquivo salvo.
+        """
+        destino = Path(__file__).resolve().parents[2] / 'screeshots'
+        destino.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        caminho = destino / f"{prefixo}_{timestamp}.png"
+        driver.save_screenshot(str(caminho))
+        logger.info("Screenshot salvo em: %s", caminho)
+
+        return caminho
