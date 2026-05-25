@@ -18,6 +18,21 @@ import pandas as pd
 # I/O
 # ─────────────────────────────────────────────────────────────────────────────
 
+def extrair_credor(valor: str) -> tuple[str | None, str | None]:
+    """
+    '1 - O2 ENGENHARIA LTDA - EPP'
+    → credor_cod='1', credor_nome='O2 ENGENHARIA LTDA - EPP'
+    """
+    valor = str(valor).strip()
+
+    if ' - ' in valor:
+        cod, nome = valor.split(' - ', 1)
+        return cod.strip(), nome.strip()
+
+    return None, valor
+
+
+
 def ler_dados(arquivos, formato:str='csv', salto:int=0) -> pd.DataFrame:
     """Lê e concatena todos os CSVs de um glob em um único DataFrame."""
     dfs = []

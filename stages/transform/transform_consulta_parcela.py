@@ -5,7 +5,7 @@ Transforma o CSV bruto de Consulta de Parcelas do SIENGE em:
 
   fato_consulta_parcela   — estado atual de cada parcela (grain = 1 parcela)
   dim_empresa             — expandida com empresas que só existem aqui
-  dim_fornecedor          — expandida com fornecedores (credores) que só existem aqui
+  dim_fornecedor          — expandida com fornecedores (credor) que só existem aqui
 
 Dependência de execução
 -----------------------

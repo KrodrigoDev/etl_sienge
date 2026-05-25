@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 
 AUXILIAR_PATH = (
         Path(__file__).resolve().parents[2]
-        / "stages" / "extract" / "reference" / "auxiliar_contas_recebidas.xlsx"
+        / "stages" / "extract" / "reference" / "auxiliar_contas_recebidas_socios.xlsx"
 )
 
 BASE_INPUT_DIR = (
@@ -853,8 +853,7 @@ def _salvar_acompanhamento(
     )
     df_pivot = df_pivot.merge(cr, on="titulo", how="left")
 
-    df_pivot = df_pivot.dropna(subset=['vgv_vendido']).reset_index(
-        drop=True)  # isso faz com que os clientes com contratos com distrato saiam
+    df_pivot = df_pivot.dropna(subset=['vgv_vendido']).reset_index(drop=True) # isso faz com que os clientes com contratos com distrato saiam
 
     # ── 4. Métricas derivadas ─────────────────────────────────────────────────
     df_pivot["contrato_total"] = (

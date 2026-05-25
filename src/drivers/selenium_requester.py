@@ -323,7 +323,7 @@ class SeleniumRequester:
     @staticmethod
     def aguardar_carregamento_tabela(
             driver: webdriver.Edge,
-            timeout: int = 150,
+            timeout: int = 240,
     ) -> None:
         """
         Aguarda o spinner de carregamento da MUI DataGrid desaparecer,
@@ -509,7 +509,7 @@ class SeleniumRequester:
         -------
         Path do arquivo salvo.
         """
-        destino = Path(__file__).resolve().parents[2] / 'screeshots'
+        destino = Path(__file__).resolve().parents[2] / 'logs' / 'screeshots'
         destino.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
