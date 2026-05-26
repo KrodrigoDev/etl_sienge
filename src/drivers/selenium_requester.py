@@ -226,8 +226,6 @@ class SeleniumRequester:
             f"verifique a pasta {self.download_dir}"
         )
 
-
-
     @staticmethod
     def selecionar_opcao_combobox(
             wdw: WebDriverWait,
@@ -491,7 +489,7 @@ class SeleniumRequester:
         driver.switch_to.frame(frame)
 
     @staticmethod
-    def salvar_screenshot_debug(driver, prefixo: str = "debug") -> Path:
+    def salvar_screenshot_debug(driver, nome_extracao: str, prefixo: str = "debug") -> Path:
         """
         Salva um screenshot da tela atual do driver para auxiliar no diagnóstico
         de problemas em execuções headless (ex: via Agendador de Tarefas).
@@ -509,7 +507,7 @@ class SeleniumRequester:
         -------
         Path do arquivo salvo.
         """
-        destino = Path(__file__).resolve().parents[2] / 'logs' / 'screeshots'
+        destino = Path(__file__).resolve().parents[2] / 'logs' / 'screeshots' / nome_extracao
         destino.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

@@ -149,7 +149,7 @@ def extrair_consulta_parcela(
         )
 
         # Debug: confirma os valores preenchidos antes de consultar
-        req.salvar_screenshot_debug(driver, prefixo="02_datas_preenchidas")
+        req.salvar_screenshot_debug(driver, nome_extracao='consulta_parcela', prefixo="02_datas_preenchidas")
 
         # ── 5. Consultar ──────────────────────────────────────────────────────
         logger.info("Consultando...")
@@ -264,7 +264,7 @@ def extrair_consulta_parcela(
 
     finally:
 
-        req.salvar_screenshot_debug(driver, prefixo="estado_final")
+        req.salvar_screenshot_debug(driver, nome_extracao='consulta_parcela', prefixo="estado_final")
 
         sleep(0.5)
         driver.quit()

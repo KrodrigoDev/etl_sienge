@@ -254,7 +254,7 @@ def executar(input_dir: Path = INPUT_DIR,
     )
     fato_solicitacao_item['dias_solicitacao_ate_pedido'] = (
             fato_solicitacao_item['data_do_pedido'] -
-            fato_solicitacao_item['data_da_solicitacao']
+            fato_solicitacao_item['data_autorizacao_da_solicitacao']
     ).dt.days
     fato_solicitacao_item['dias_atraso_entrega'] = (
             fato_solicitacao_item['data_entrega_na_obra'] -

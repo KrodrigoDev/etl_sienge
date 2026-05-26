@@ -12,13 +12,16 @@ import random
 from pathlib import Path
 from time import sleep
 import os
+import re
 
+import pandas as pd
 from dotenv import load_dotenv
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select
 from selenium.webdriver.common.action_chains import ActionChains
+from selenium.common.exceptions import TimeoutException
 
 from src.drivers.selenium_requester import SeleniumRequester
 
@@ -26,11 +29,20 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-# ── URLs ──────────────────────────────────────────────────────────────
+# ── Configurações ──────────────────────────────────────────────────────────────
 URL_BASE = "https://maceio.giss.com.br/portal/home"
 
+pasta_origem = Path(__file__).resolve().parents[2]
 
-# ── Helpers humanos ───────────────────────────────────────────────────
+INPUT_DIR = pasta_origem / 'stages' / 'transform' / 'input' / 'servico_tomado'
+INPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+# ── Helpers  ───────────────────────────────────────────────────
+
+def normalizar_cnpj(cnpj: str) -> str:
+    return re.sub(r'\D', '', cnpj)
+
 
 def pausa_humana(minimo: float = 1.0, maximo: float = 3.5) -> None:
     """Pausa aleatória para simular comportamento humano."""
@@ -137,8 +149,87 @@ def fazer_login(driver) -> None:
     mover_mouse_e_clicar(driver, botao)
 
 
+def mostrar_itens_empresa(wdw) -> None:
+    pausa_humana(1.5, 3.0)
+
+    select_elem = wdw.until(
+        EC.presence_of_element_located(
+            (
+                By.XPATH,
+                '//select[contains(@name,"DataTables_Table_") and contains(@name,"_length")]'
+            )
+        )
+    )
+
+    pausa_humana(1.5, 3.0)
+
+    Select(select_elem).select_by_visible_text("50")
+
+
+def garantir_sem_backdrop(driver, wdw, timeout: int = 10) -> bool:
+    """
+    Aguarda o modal-backdrop sumir completamente antes de prosseguir.
+    Se ainda estiver presente, tenta fechá-lo via ESC ou clique no botão de fechar.
+
+    Retorna True se a tela ficou limpa, False se não conseguiu resolver.
+    """
+    XPATH_BACKDROP = '//div[contains(@class,"modal-backdrop") and contains(@class,"show")]'
+    XPATH_BTN_FECHAR = (
+        '//div[contains(@class,"modal") and contains(@class,"show")]'
+        '//*[self::button[@data-dismiss="modal"] or self::button[contains(@class,"close")] '
+        'or self::button[normalize-space()="Ok"] or self::button[normalize-space()="OK"]]'
+    )
+
+    # -- 1. Verifica se há backdrop ativo --
+    backdrops = driver.find_elements(By.XPATH, XPATH_BACKDROP)
+
+    if not backdrops:
+        return True  # tela já limpa
+
+    logger.warning("modal-backdrop detectado — tentando fechar modal antes de prosseguir.")
+
+    # -- 2. Tenta clicar no botão de fechar do modal --
+    try:
+        btn = driver.find_element(By.XPATH, XPATH_BTN_FECHAR)
+        driver.execute_script("arguments[0].click();", btn)
+        logger.info("Botão de fechar modal clicado via JS.")
+        pausa_humana(1.0, 2.0)
+    except Exception:
+        logger.info("Botão de fechar não encontrado — tentando ESC.")
+        driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ESCAPE)
+        pausa_humana(1.0, 2.0)
+
+    # -- 3. Aguarda backdrop desaparecer --
+    try:
+        wdw.until(
+            EC.invisibility_of_element_located((By.XPATH, XPATH_BACKDROP))
+        )
+        logger.info("Backdrop removido com sucesso.")
+        return True
+
+    except TimeoutException:
+        # -- 4. Último recurso: remove via JS --
+        logger.warning("Backdrop persistente — removendo via JS.")
+        driver.execute_script("""
+            document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+            document.body.classList.remove('modal-open');
+            document.body.style.overflow = '';
+        """)
+        pausa_humana(0.5, 1.0)
+
+        backdrops_restantes = driver.find_elements(By.XPATH, XPATH_BACKDROP)
+        if backdrops_restantes:
+            logger.error("Não foi possível remover o backdrop.")
+            return False
+
+        logger.info("Backdrop removido via JS.")
+        return True
+
+
 def extrair_empresas(driver, wdw, req) -> list[dict]:
     """Retorna lista de empresas disponíveis na tabela."""
+
+    mostrar_itens_empresa(wdw)
 
     req.aguardar_presenca(wdw, (By.ID, "DataTables_Table_0"))
 
@@ -219,34 +310,21 @@ def acessar_servicos_tomados(driver) -> None:
     pausa_humana(2.0, 4.0)
 
 
-def preencher_filtro_periodo(driver, wdw, req, data_ini: str, data_fim: str) -> None:
+def preencher_filtro_periodo(driver, competencia: str) -> None:
     """Seleciona o filtro por período e preenche as datas."""
 
-    # clica no radio/label de período
-    label_periodo = wdw.until(
-        EC.element_to_be_clickable((By.XPATH, '//label[@for="opcaoPeriodo"]'))
-    )
-    scroll_humano(driver, label_periodo)
-    mover_mouse_e_clicar(driver, label_periodo)
-    pausa_humana(0.8, 1.5)
-
-    # data inicial
-    campo_ini = driver.find_element(By.ID, 'periodoInicio')
-    scroll_humano(driver, campo_ini)
-    campo_ini.clear()
-    digitar_humanamente(campo_ini, data_ini)
+    campo_competencia = driver.find_element(By.ID, 'competencia')
+    scroll_humano(driver, campo_competencia)
+    campo_competencia.clear()
+    digitar_humanamente(campo_competencia, competencia)
 
     pausa_humana(0.5, 1.0)
 
-    # data final
-    campo_fim = driver.find_element(By.ID, 'periodoFim')
-    campo_fim.clear()
-    digitar_humanamente(campo_fim, data_fim)
-
-    pausa_humana(1.0, 2.0)
-
 
 def clicar_consultar(driver, wdw, req) -> None:
+
+    garantir_sem_backdrop(driver, wdw)
+
     req.aguardar_e_clicar(wdw, locator=(By.ID, "botaoConsultar"))
     pausa_humana(2.0, 4.0)
 
@@ -262,6 +340,7 @@ def ajustar_paginacao(driver, wdw, tamanho: str = "50") -> None:
     pausa_humana(0.5, 1.0)
     Select(select_elem).select_by_visible_text(tamanho)
     pausa_humana(1.5, 3.0)
+
 
 def extrair_todas_paginas(driver, wdw) -> list[dict]:
     """
@@ -281,7 +360,7 @@ def extrair_todas_paginas(driver, wdw) -> list[dict]:
         logger.info(f"  → {len(notas_pagina)} notas na página {pagina} | total acumulado: {len(todas_notas)}")
 
         # simula leitura da página
-        pausa_humana(1.5, 3.5)
+        # pausa_humana(1.5, 3.5) Sem pausas para realizar extração
 
         # ── verifica botão Próximo ────────────────────────────────────
         botoes_proximo = driver.find_elements(
@@ -297,9 +376,9 @@ def extrair_todas_paginas(driver, wdw) -> list[dict]:
 
         # checa se está desabilitado (atributo disabled ou classe disabled no pai li)
         desabilitado = (
-            botao_proximo.get_attribute("disabled") is not None
-            or not botao_proximo.is_enabled()
-            or "disabled" in (botao_proximo.find_element(By.XPATH, "..").get_attribute("class") or "")
+                botao_proximo.get_attribute("disabled") is not None
+                or not botao_proximo.is_enabled()
+                or "disabled" in (botao_proximo.find_element(By.XPATH, "..").get_attribute("class") or "")
         )
 
         if desabilitado:
@@ -351,15 +430,15 @@ def extrair_notas_tabela(driver) -> list[dict]:
             # 7=CNPJ/CPF, 8=Prestador, 9=Atividade, 11=Valor, 12=Situação, 13=Declaração
 
             nota = {
-                'competencia':   colunas[0].text.strip()  if len(colunas) > 0  else '',
-                'nfs':           colunas[1].text.strip()  if len(colunas) > 1  else '',
-                'emissao':       colunas[5].text.strip()  if len(colunas) > 5  else '',
-                'cnpj_cpf':      colunas[7].text.strip()  if len(colunas) > 7  else '',
-                'prestador':     colunas[8].text.strip()  if len(colunas) > 8  else '',
-                'atividade':     colunas[9].text.strip()  if len(colunas) > 9  else '',
-                'valor':         colunas[11].text.strip() if len(colunas) > 11 else '',
-                'situacao':      colunas[12].text.strip() if len(colunas) > 12 else '',
-                'declaracao':    colunas[13].text.strip() if len(colunas) > 13 else '',
+                'competencia': colunas[0].text.strip() if len(colunas) > 0 else '',
+                'nfs': colunas[1].text.strip() if len(colunas) > 1 else '',
+                'emissao': colunas[5].text.strip() if len(colunas) > 5 else '',
+                'cnpj_cpf': colunas[7].text.strip() if len(colunas) > 7 else '',
+                'prestador': colunas[8].text.strip() if len(colunas) > 8 else '',
+                'atividade': colunas[9].text.strip() if len(colunas) > 9 else '',
+                'valor': colunas[11].text.strip() if len(colunas) > 11 else '',
+                'situacao': colunas[12].text.strip() if len(colunas) > 12 else '',
+                'declaracao': colunas[13].text.strip() if len(colunas) > 13 else '',
             }
 
             notas.append(nota)
@@ -374,87 +453,154 @@ def extrair_notas_tabela(driver) -> list[dict]:
     return notas
 
 
-def processar_empresa(driver, wdw, req, cnpj: str, data_ini: str, data_fim: str) -> list[dict]:
+def remover_aviso(driver, wdw) -> bool:
     """
-    Fluxo completo para um único CNPJ:
-    seleciona → navega → filtra → extrai → retorna notas.
+    Fecha o popup SweetAlert caso apareça após a consulta.
+
+    Retorna:
+        True  -> aviso apareceu e foi fechado
+        False -> aviso não apareceu
     """
-    logger.info(f"\n{'='*60}")
-    logger.info(f"Processando CNPJ: {cnpj}")
-    logger.info(f"{'='*60}")
 
-    # 1. volta para a lista de empresas
-    driver.get(f"{URL_BASE}#/login-portal")  # chamar o fechar modal e fazer login novamente
-    fechar_modal(driver)
-    fazer_login(driver)
+    try:
+        logger.info("Verificando aviso de ausência de notas...")
 
-    pausa_humana(2.0, 4.0)
+        # aguarda o modal aparecer
+        botao_ok = wdw.until(
+            EC.presence_of_element_located(
+                (
+                    By.XPATH,
+                    '//div[contains(@class,"sweet-alert") and contains(@class,"visible")]'
+                    '//button[contains(@class,"confirm") and normalize-space()="Ok"]'
+                )
+            )
+        )
 
-    # 2. seleciona a empresa
-    ok = selecionar_empresa(driver, wdw, cnpj)
-    if not ok:
-        logger.error(f"Pulando CNPJ {cnpj} — não foi possível selecionar.")
-        return []
+        pausa_humana(0.5, 1.2)
 
-    # 3. navega para serviços tomados
+        scroll_humano(driver, botao_ok)
+
+        # clique via JS evita problema de overlay
+        driver.execute_script("arguments[0].click();", botao_ok)
+
+        logger.info("Aviso encontrado e fechado.")
+        pausa_humana(1.0, 2.0)
+
+        garantir_sem_backdrop(driver, wdw)
+
+        return True
+
+    except TimeoutException:
+        logger.info("Nenhum aviso encontrado.")
+        return False
+
+    except Exception as e:
+        logger.warning(f"Erro ao remover aviso: {e}")
+        return False
+
+
+def processar_empresa(driver, wdw, req, cnpj: str, competencia: str, novo_cnpj: bool = True) -> list[dict]:
+    logger.info(f"\n{'=' * 60}")
+    logger.info(f"Processando CNPJ: {cnpj} | Competência: {competencia}")
+    logger.info(f"{'=' * 60}")
+
+    if novo_cnpj:
+        driver.get(f"{URL_BASE}#/login-portal")
+        fechar_modal(driver)
+        fazer_login(driver)
+        pausa_humana(2.0, 4.0)
+
+        mostrar_itens_empresa(wdw)
+
+
+        ok = selecionar_empresa(driver, wdw, cnpj)
+        if not ok:
+            logger.error(f"Pulando CNPJ {cnpj} — não foi possível selecionar.")
+            return []
+
+    garantir_sem_backdrop(driver, wdw)
+
+    # ← sempre executa, independente de novo_cnpj
     acessar_servicos_tomados(driver)
-
-    # 4. preenche filtro de data
-    preencher_filtro_periodo(driver, wdw, req, data_ini, data_fim)
-
-    # 5. executa consulta
+    preencher_filtro_periodo(driver, competencia)
     clicar_consultar(driver, wdw, req)
 
-    # 6. ajusta paginação
+    teve_aviso = remover_aviso(driver, wdw)
+
+    if teve_aviso:
+        logger.info("Consulta sem notas fiscais.")
+        return []
+
     ajustar_paginacao(driver, wdw, "50")
 
-    # 7. extrai notas
     notas = extrair_todas_paginas(driver, wdw)
+    logger.info(f"  → {len(notas)} notas extraídas para {cnpj} na competência {competencia}")
 
-    logger.info(f"  → {len(notas)} notas extraídas para {cnpj}")
-
-    # pausa longa entre empresas (simula usuário descansando / lendo resultado)
     pausa_humana(3.0, 7.0)
-
     return notas
 
 
-def main():
+MES_INICIAL = 1
+MES_FINAL = 5
 
+
+def main():
     req = SeleniumRequester()
     driver = req.get_driver()
     wdw = req.waiter(driver)
 
-    # ── login ─────────────────────────────────────────────────────────
     driver.get(f"{URL_BASE}#/login-portal")
     fechar_modal(driver)
     fazer_login(driver)
 
-    # ── lista de empresas ─────────────────────────────────────────────
     empresas = extrair_empresas(driver, wdw, req)
 
-    # ── parâmetros de consulta ────────────────────────────────────────
-    DATA_INI = '01/01/2026'
-    DATA_FIM = '31/01/2026'
-
-    # ── processa cada empresa ─────────────────────────────────────────
-    todas_notas: dict[str, list[dict]] = {}
+    dfs = []
 
     for emp in empresas:
         cnpj = emp['cnpj']
 
-        notas = processar_empresa(driver, wdw, req, cnpj, DATA_INI, DATA_FIM)
-        todas_notas[cnpj] = notas
+        cnpj_normalizado = normalizar_cnpj(cnpj)
 
-        # pausa extra aleatória entre CNPJs (3-10s)
-        pausa_humana(3.0, 10.0)
+        path_cnpj = INPUT_DIR / cnpj_normalizado
 
-    # ── resultado final ───────────────────────────────────────────────
-    logger.info("\n\nRESUMO FINAL")
-    for cnpj, notas in todas_notas.items():
-        logger.info(f"  {cnpj}: {len(notas)} notas")
+        if path_cnpj.exists():
+            logger.info(f'Pulando o {cnpj} por já existir')
+            continue
 
-    return todas_notas
+        path_cnpj.mkdir(parents=True, exist_ok=True)
+
+        for mes in range(MES_INICIAL, MES_FINAL + 1):
+            try:
+                notas = processar_empresa(
+                    driver, wdw, req,
+                    cnpj,
+                    competencia=f'{mes:02d}/2026',
+                    novo_cnpj=(mes == MES_INICIAL),
+                )
+
+                if notas:
+                    df_cnpj = pd.DataFrame(notas)
+                    df_cnpj['cnpj_empresa'] = cnpj
+
+                    df_cnpj.to_csv(
+                        path_cnpj / f'competencia_{mes:02d}-2026.csv',
+                        index=False,
+                        sep=';'
+                    )
+                    dfs.append(df_cnpj)
+                    logger.info(f"{cnpj} | {mes:02d}/2026: {len(notas)} notas salvas")
+                else:
+                    logger.info(f"{cnpj} | {mes:02d}/2026: sem notas")
+
+            except Exception as e:
+                logger.exception(f"Erro ao processar {cnpj} competência {mes:02d}/2026: {e}")
+
+            pausa_humana(3.0, 10.0)
+
+        pausa_humana(3.0, 10.0)  # pausa entre empresas
+
+    return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
 
 
 if __name__ == '__main__':
@@ -462,4 +608,6 @@ if __name__ == '__main__':
         level=logging.INFO,
         format='%(asctime)s [%(levelname)s] %(message)s'
     )
-    main()
+    df_final = main()
+
+    df_final.to_csv(INPUT_DIR / "df_final.csv", index=False, sep=';')
