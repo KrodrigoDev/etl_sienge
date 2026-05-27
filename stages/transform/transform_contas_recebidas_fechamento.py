@@ -828,7 +828,8 @@ def _salvar_acompanhamento(
     # ── 1. Pivot ──────────────────────────────────────────────────────────────
 
     df_sin_fechamento = df_sin_fechamento.rename(columns={
-        "amortizacao": "bruto"
+        "liquido": "bruto",
+        "valor_liquido_repasse": "liquido"
     })
 
     df_pivot, col_map = _construir_pivot_mensal(df_sin_fechamento)
@@ -839,7 +840,7 @@ def _salvar_acompanhamento(
         return
 
     # ── 2. Totais históricos ──────────────────────────────────────────────────
-    cols_liq = [c for c in df_pivot.columns if c.endswith("_liquido")]
+    cols_liq = [c for c in df_pivot.columns if c.endswith("_bruto")]
     df_pivot["valor_liquido_total"] = df_pivot[cols_liq].sum(axis=1)
     df_pivot["pct_repasse"] = pct
     df_pivot["valor_liquido_repasse"] = (df_pivot["valor_liquido_total"] * pct).round(2)
@@ -867,8 +868,9 @@ def _salvar_acompanhamento(
 
     df_pivot['valor_a_repassar'] = (df_pivot["total_por_cliente"] - df_pivot['valor_liquido_repasse'])
 
+
     df_pivot = df_pivot.rename(columns={
-        "amortizacao": "bruto"
+        "liquido": "bruto",
     })
 
     # ── 5. Layout de colunas ──────────────────────────────────────────────────

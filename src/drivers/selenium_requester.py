@@ -34,16 +34,14 @@ LOGIN_URL = f"{BASE_URL}/index.jsp"
 TIMEOUT = 30  # segundos padrão para WebDriverWait
 DL_TIMEOUT = 120  # segundos máximos para aguardar download
 
-# criar uma lista de perfil para caso em algum eu tenho um erro de uso, tentar o outro (máximo 3)
-PERFIS = ['Edge_01', 'Edge_02', 'Edge_03']
 
 class SeleniumRequester:
 
-    def __init__(self, download_dir: Path | None = None):
+    def __init__(self, download_dir: Path | None = None, profile: str = 'Edge'):
 
         self.project_root = Path(__file__).resolve().parents[2]
 
-        self.path_profile = Path(r"C:\SeleniumPerfil\Edge_Novo")
+        self.path_profile = Path(fr"C:\SeleniumPerfil\{profile}")
 
         self.download_dir = download_dir or (
                 self.project_root / "stages" / "transform" / "input"

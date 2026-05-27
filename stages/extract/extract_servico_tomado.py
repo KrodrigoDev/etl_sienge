@@ -545,7 +545,7 @@ MES_FINAL = 5
 
 
 def main():
-    req = SeleniumRequester()
+    req = SeleniumRequester(profile='Edge_02', download_dir=None)
     driver = req.get_driver()
     wdw = req.waiter(driver)
 
@@ -564,7 +564,7 @@ def main():
 
         path_cnpj = INPUT_DIR / cnpj_normalizado
 
-        if path_cnpj.exists():
+        if path_cnpj.exists() and len(list(path_cnpj.glob('*.csv*'))) > 1:
             logger.info(f'Pulando o {cnpj} por já existir')
             continue
 

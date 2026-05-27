@@ -15,13 +15,13 @@ INPUT_DIR = pasta_origem / 'stages' / 'transform' / 'input'
 OUTPUT_DIR = pasta_origem / 'stages' / 'transform' / 'output'
 
 THRESHOLD = 90  # score mínimo para considerar match
-TOLERANCIA_DIAS = 25  # janela de datas aceita (em dias)
+TOLERANCIA_DIAS = 45  # janela de datas aceita (em dias)
 
 PESOS = {
     'cnpj': 50,
-    'valor': 10, # antes era 30
+    'valor': 10,  # antes era 30
     'data': 10,
-    'doc': 30, # antes era 10
+    'doc': 30,  # antes era 10
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -36,6 +36,65 @@ df_sienge = pd.merge(df_titulo, dim_credor_receita, on='credor', how='left')
 files = (INPUT_DIR / 'servico_tomado').rglob('*.csv*')
 df_giss = pd.concat([pd.read_csv(f, sep=';', decimal=',') for f in files],
                     ignore_index=True, )
+
+
+def ler_auxiliar_empresas():
+    df_empresa = pd.read_excel(
+        INPUT_DIR / 'reference' / 'auxliar_empresas.xlsx',
+        skiprows=3
+    )
+
+    # define índice
+    df_empresa = df_empresa.set_index('Unnamed: 0')
+
+    # pega somente coluna desejada
+    serie = df_empresa['Unnamed: 2']
+
+    # empresas
+    empresas = (
+        serie.loc['Empresa']
+        .reset_index(drop=True)
+        .rename('empresa')
+    )
+
+    # cnpjs
+    cnpjs = (
+        serie.loc['CNPJ']
+        .reset_index(drop=True)
+        .rename('cnpj')
+    )
+
+    # junta lado a lado
+    df_normalizado = pd.concat(
+        [empresas, cnpjs],
+        axis=1
+    )
+
+    # remove linhas vazias
+    df_normalizado = df_normalizado.dropna(
+        subset=['empresa', 'cnpj'],
+        how='all'
+    )
+
+    # limpa espaços
+    df_normalizado['empresa'] = (
+        df_normalizado['empresa']
+        .astype(str)
+        .str.strip()
+    )
+
+    df_normalizado['cnpj'] = (
+        df_normalizado['cnpj']
+        .astype(str)
+        .str.strip()
+    )
+
+    df_normalizado = df_normalizado.drop_duplicates(
+        subset='cnpj',
+        keep='first'
+    )
+
+    return df_normalizado
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -68,8 +127,11 @@ def _limpar_cnpj(s: pd.Series) -> pd.Series:
 
 
 def _extrair_numero_doc(s: pd.Series) -> pd.Series:
-    """'NFS /123'  →  123.0  (float para comparação segura)."""
-    return s.astype(str).str.extract(r'(\d+)\s*$')[0].astype(float)
+    return (
+        s.astype(str)
+        .str.extract(r'(\d+)(?!.*\d)')[0]
+        .astype('Int64')
+    )
 
 
 def _normalizar_valor(s: pd.Series) -> pd.Series:
@@ -89,9 +151,18 @@ def _preparar_giss(df: pd.DataFrame) -> pd.DataFrame:
     df['_num_doc'] = pd.to_numeric(df['nfs'], errors='coerce')
     df['_idx_giss'] = df.index  # guarda posição original
 
-    print(df.shape)
-    df.drop_duplicates(subset=['_cnpj_norm', '_num_doc','_data','_valor'], inplace=True)
-    print(df.shape)
+    df.drop_duplicates(subset=['_cnpj_norm', '_num_doc', '_data', '_valor'], inplace=True)
+
+    auxiliar_empresa = ler_auxiliar_empresas()
+
+
+    df = df.merge(auxiliar_empresa, left_on='cnpj_empresa', right_on='cnpj', how='left')
+
+
+    df.drop(columns='cnpj',inplace=True)
+
+    df = df[df['situacao'] == 'Ativa'].reset_index(drop=True)
+
     return df
 
 
@@ -108,6 +179,25 @@ def _preparar_sienge(df: pd.DataFrame) -> pd.DataFrame:
 # ─────────────────────────────────────────────────────────────────────────────
 # SCORE VETORIZADO (opera em DataFrames já alinhados pelo cross-join)
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _doc_similar(doc_g, doc_s):
+    if pd.isna(doc_g) or pd.isna(doc_s):
+        return False
+
+    doc_g = str(int(doc_g))
+    doc_s = str(int(doc_s))
+
+    if doc_g == doc_s:
+        return True
+
+    # regra de "dígito faltando": só aplica para docs com >= 5 dígitos
+    diff = abs(len(doc_g) - len(doc_s))
+    if diff == 1 and min(len(doc_g), len(doc_s)) >= 5:
+        menor, maior = (doc_g, doc_s) if len(doc_g) < len(doc_s) else (doc_s, doc_g)
+        if maior.startswith(menor) or maior.endswith(menor):
+            return True
+
+    return False
 
 def _calcular_scores(cross: pd.DataFrame) -> pd.Series:
     score = pd.Series(0, index=cross.index, dtype=int)
@@ -126,7 +216,14 @@ def _calcular_scores(cross: pd.DataFrame) -> pd.Series:
     score += mask_data.fillna(False) * PESOS['data']
 
     # Número do documento (10 pts)
-    mask_doc = cross['_num_doc_g'] == cross['_num_doc_s']
+    mask_doc = cross.apply(
+        lambda row: _doc_similar(
+            row['_num_doc_g'],
+            row['_num_doc_s']
+        ),
+        axis=1
+    )
+
     score += mask_doc.fillna(False) * PESOS['doc']
 
     return score
@@ -170,28 +267,26 @@ def match_bases(
 
         cross['score'] = _calcular_scores(cross)
 
-        if  cnpj == "15661525000145":
-            debug_cols = [
-                '_cnpj_norm_g',
-                '_cnpj_norm_s',
-                '_valor_g',
-                '_valor_s',
-                '_data_g',
-                '_data_s',
-                '_num_doc_g',
-                '_num_doc_s',
-                'score'
-            ]
-
-            print(f"\n========== DEBUG CNPJ {cnpj} ==========")
-            print(
-                cross[debug_cols]
-                .sort_values('score', ascending=False)
-                .head(40)
-                .to_string()
-            )
-
-        #        56186086000143  56186086000143  16872.44   16872.4 2026-01-05 2026-01-05          14        14.0     70  caso onde não passsou devio a casa decimal
+        # if cnpj == "63561596000119":
+        #     debug_cols = [
+        #         '_cnpj_norm_g',
+        #         '_cnpj_norm_s',
+        #         '_valor_g',
+        #         '_valor_s',
+        #         '_data_g',
+        #         '_data_s',
+        #         '_num_doc_g',
+        #         '_num_doc_s',
+        #         'score'
+        #     ]
+        #
+        #     print(f"\n========== DEBUG CNPJ {cnpj} ==========")
+        #     print(
+        #         cross[debug_cols]
+        #         .sort_values('score', ascending=False)
+        #         .head(1000)
+        #         .to_string()
+        #     )
 
         pares.append(cross[cross['score'] >= threshold])
 
@@ -273,17 +368,20 @@ df_only_sienge = _limpar_aux(df_only_sienge)
 # SAÍDA
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 df_matched = df_matched[
     [
         'cnpj_empresa_giss', 'competencia_giss', 'cnpj_cpf_giss', 'prestador_giss', 'nfs_giss',
         'valor_giss', 'situacao_giss', 'declaracao_giss', 'titulo_sienge', 'credor_sienge',
-        'cnpj/cpf_sienge', 'documento_sienge', 'emissao_nf_sienge', 'valor_bruto_sienge', 'score_similaridade', 'score_label'
+        'cnpj/cpf_sienge', 'documento_sienge', 'emissao_nf_sienge', 'valor_bruto_sienge', 'score_similaridade',
+        'score_label'
     ]
 ]
 
 df_matched.to_csv('presente_em_ambas.csv', sep=';', index=False)
 df_only_giss.to_csv('apenas_no_giss.csv', sep=';', index=False)
 df_only_sienge.to_csv('apenas_no_sienge.csv', sep=';', index=False)
+
 
 print(f"matched      : {len(df_matched):>6} registros  → match_merged.csv")
 print(f"only_giss    : {len(df_only_giss):>6} registros  → match_only_giss.csv")
@@ -293,3 +391,12 @@ print(f"Tolerância datas: {TOLERANCIA_DIAS} dias")
 if not df_matched.empty:
     print(f"\nDistribuição de score_label:")
     print(df_matched['score_label'].value_counts().to_string())
+
+
+from utils.gerar_relatorio_servico_tomado import gerar_relatorio_xlsx
+
+
+#  lembrar de deixar como data a coluna de emissão no giss
+
+gerar_relatorio_xlsx(df_matched, df_only_giss, df_only_sienge,
+                     caminho_saida="relatorio_conciliacao.xlsx")

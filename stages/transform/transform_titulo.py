@@ -224,7 +224,7 @@ def _build_dim_titulo_obra(
     # Enriquece com tipo_obra da tabela de referência
     dim = pd.merge(
         dim,
-        df_auxiliar[['Cod. Centro de Custo', 'Tipo de Obra 2 ']].rename(columns={
+        df_auxiliar[['Centro de Custo 1', 'Centro de Custo 2', 'Cod. Centro de Custo', 'Tipo de Obra 2 ']].rename(columns={
             'Cod. Centro de Custo': 'cod_obra',
             'Tipo de Obra 2 ': 'tipo_obra',
         }),
