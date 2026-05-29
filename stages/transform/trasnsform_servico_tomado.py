@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import numpy as np
 from pathlib import Path
+from datetime import date
 
 import pandas as pd
+
+from utils.normalizer import salvar_tabela
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIGURAÇÃO
@@ -155,11 +158,9 @@ def _preparar_giss(df: pd.DataFrame) -> pd.DataFrame:
 
     auxiliar_empresa = ler_auxiliar_empresas()
 
-
     df = df.merge(auxiliar_empresa, left_on='cnpj_empresa', right_on='cnpj', how='left')
 
-
-    df.drop(columns='cnpj',inplace=True)
+    df.drop(columns='cnpj', inplace=True)
 
     df = df[df['situacao'] == 'Ativa'].reset_index(drop=True)
 
@@ -198,6 +199,7 @@ def _doc_similar(doc_g, doc_s):
             return True
 
     return False
+
 
 def _calcular_scores(cross: pd.DataFrame) -> pd.Series:
     score = pd.Series(0, index=cross.index, dtype=int)
@@ -267,7 +269,7 @@ def match_bases(
 
         cross['score'] = _calcular_scores(cross)
 
-        # if cnpj == "63561596000119":
+        # if cnpj == "10829093000115":
         #     debug_cols = [
         #         '_cnpj_norm_g',
         #         '_cnpj_norm_s',
@@ -378,11 +380,6 @@ df_matched = df_matched[
     ]
 ]
 
-df_matched.to_csv('presente_em_ambas.csv', sep=';', index=False)
-df_only_giss.to_csv('apenas_no_giss.csv', sep=';', index=False)
-df_only_sienge.to_csv('apenas_no_sienge.csv', sep=';', index=False)
-
-
 print(f"matched      : {len(df_matched):>6} registros  → match_merged.csv")
 print(f"only_giss    : {len(df_only_giss):>6} registros  → match_only_giss.csv")
 print(f"only_sienge  : {len(df_only_sienge):>6} registros  → match_only_sienge.csv")
@@ -393,10 +390,43 @@ if not df_matched.empty:
     print(df_matched['score_label'].value_counts().to_string())
 
 
-from utils.gerar_relatorio_servico_tomado import gerar_relatorio_xlsx
+# ─────────────────────────────────────────────────────────────────────────────
+# FAIXA DE ANTIGUIDADE
+# Calculada com base na data de emissão vs. hoje (data da carga).
+# Persiste no CSV para uso direto no BI sem medida calculada adicional.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_data_ref = pd.Timestamp(date.today())
+
+df_only_giss['_emissao_dt'] = pd.to_datetime(
+    df_only_giss['emissao'], dayfirst=True, errors='coerce'
+).dt.normalize()
+
+df_only_giss['dias_em_aberto'] = (
+    (_data_ref - df_only_giss['_emissao_dt'])
+    .dt.days
+    .clip(lower=0)
+)
+
+df_only_giss['faixa_antiguidade'] = pd.cut(
+    df_only_giss['dias_em_aberto'],
+    bins=[-1, 15, 30, 45, 90, float('inf')],
+    labels=['A. 0–15d', 'B. 16–30d', 'C. 31–45d', 'D. 46–90d', 'E. >90d (crítico)'],
+    right=True,
+).astype(str)
+
+df_only_giss = df_only_giss.drop(columns='_emissao_dt')
 
 
-#  lembrar de deixar como data a coluna de emissão no giss
+hoje = date.today().isoformat()
+df_only_giss['data_carga'] = hoje
 
-gerar_relatorio_xlsx(df_matched, df_only_giss, df_only_sienge,
-                     caminho_saida="relatorio_conciliacao.xlsx")
+caminho_fato = OUTPUT_DIR / 'fato_servico_tomado_giss.csv'
+
+if caminho_fato.exists():
+    df_historico = pd.read_csv(caminho_fato, sep=';')
+    df_historico = df_historico[df_historico['data_carga'] != hoje]
+    df_only_giss = pd.concat([df_historico, df_only_giss], ignore_index=True)
+    print(f"  Histórico preservado: {df_historico['data_carga'].nunique()} data(s) anterior(es)")
+
+salvar_tabela(df_only_giss, 'fato_servico_tomado_giss', OUTPUT_DIR)

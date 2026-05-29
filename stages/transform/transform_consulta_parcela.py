@@ -325,6 +325,8 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
 
     df = pd.concat([df, df_banco, df_pix], axis=1)
 
+    df = df[~df['documento'].isin(['PCT', 'PER', 'PPC'])]
+
     print(f"  Registros com banco preenchido: "
           f"{(df['banco_cod'] != '').sum():,}")
     print(f"  Registros com PIX preenchido:   "
@@ -343,6 +345,27 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         "t " + df["titulo"].astype(str),
         ""
     )
+
+    df['dias_titulo_c_obra'] = (
+        df['data_de_cadastro'] -
+        df['data_emissao']
+
+    ).dt.days
+
+    df['dias_ate_vencimento'] = (
+            df['data_vencimento'] -
+            df['data_de_cadastro']
+    ).dt.days
+
+    df['dias_atraso_pgto'] = (
+        df['data_do_pagamento'] -
+        df['data_vencimento']
+    ).dt.days
+
+    df['dias_lancamento_ate_pgto'] = (
+        df['data_do_pagamento'] -
+            df['data_de_cadastro']
+    ).dt.days
 
     # ── 5. Carregar dimensões existentes ──────────────────────────────────────
     print("\n── 5. Carregando dimensões existentes ──────────────────────────────")
@@ -516,6 +539,20 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
 
     # ── 10. Montar fato_consulta_parcela ──────────────────────────────────────
 
+    # ── Faixa por soma de saldo do fornecedor ─────────────────────────────────
+
+    _saldo_forn_map = (
+        df.groupby("id_fornecedor")["saldo_em_aberto"]
+        .sum()
+        .to_dict()
+    )
+    df["saldo_total_fornecedor"] = df["id_fornecedor"].map(_saldo_forn_map)
+
+    df["faixa_saldo_fornecedor"] = _faixa_saldo(
+        df["saldo_total_fornecedor"]
+    ).astype(str)
+
+
     print("\n── 10. fato_consulta_parcela ───────────────────────────────────────")
 
     fato = df[[
@@ -561,6 +598,13 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         "diferenca_data_vencimento",
         "faixa_atraso",
         "faixa_saldo",
+        "faixa_saldo_fornecedor",
+        "saldo_total_fornecedor",
+        "dias_titulo_c_obra",
+        "dias_ate_vencimento",
+        "dias_atraso_pgto",
+        "dias_lancamento_ate_pgto",
+
 
         # ── Flags calculadas ──────────────────────────────────────
         "flag_vencida",

@@ -380,14 +380,15 @@ def painel_consultas() -> None:
         return
 
     etapa_transform_consulta_parcela()
+    etapa_transform_titulo()
 
-    if titulo_skip:
-        logger.info(
-            "transform_titulo ignorado — extract_titulo não rodou hoje "
-            "(output em disco já está atualizado)."
-        )
-    else:
-        etapa_transform_titulo()
+    # if titulo_skip:
+    #     logger.info(
+    #         "transform_titulo ignorado — extract_titulo não rodou hoje "
+    #         "(output em disco já está atualizado)."
+    #     )
+    # else:
+    #     etapa_transform_titulo()
 
 
 def painel_suprimentos() -> None:

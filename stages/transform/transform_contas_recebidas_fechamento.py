@@ -530,7 +530,7 @@ def ler_analitico(caminho: Path, novos: set[str], centro: dict) -> pd.DataFrame:
     dados = dados[~dados["cliente"].astype(str).apply(_eh_rodape)]
 
     for col in colunas_num:
-        if col == "amortizacao":
+        if col in ["amortizacao", "vl_baixa"]:
             dados[col] = (dados[col].astype(str)
                           .str.replace(" P", "", regex=False).str.strip())
             mask = dados[col].str.contains(",", na=False)
@@ -1013,6 +1013,7 @@ def _adicionar_fechamento_sintetico(wb: Workbook, df: pd.DataFrame,
     cabecalhos, colunas_df, colunas_valor = _colunas_excel_sintetico(centro)
 
     cols_remover = {"inadimplente", "a_vencer", "carteira_total", "vgv_vendido", "contrato_total", "check"}
+
     colunas_df = [c for c in colunas_df if c not in cols_remover]
     colunas_valor = [c for c in colunas_valor if c not in cols_remover]
     cabecalhos = [h for h, c in zip(cabecalhos, _colunas_excel_sintetico(centro)[1])
