@@ -180,7 +180,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     print(f"Total de colunas: {len(df.columns)}")
 
     print(f'df antes das duplicatas: {df.shape}')
-    df = df.drop_duplicates(subset=['grupo','cod_empresa','documento','cod_credor','titulo']).reset_index(drop=True)
+    df = df.drop_duplicates(subset=['grupo', 'cod_empresa', 'documento', 'cod_credor', 'titulo']).reset_index(drop=True)
     print(f'df depois de retirar as duplicatas: {df.shape}')
 
     # ── 2. Conversão de tipos ─────────────────────────────────────────────────
@@ -211,6 +211,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         "data_de_alteracao",
         "data_contabil",
         "data_de_competencia",
+        "vencimento_original",
         "vencimento_original",
         "data_do_calculo",
     ]
@@ -347,8 +348,8 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     )
 
     df['dias_titulo_c_obra'] = (
-        df['data_de_cadastro'] -
-        df['data_emissao']
+            df['data_de_cadastro'] -
+            df['data_emissao']
 
     ).dt.days
 
@@ -358,14 +359,63 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     ).dt.days
 
     df['dias_atraso_pgto'] = (
-        df['data_do_pagamento'] -
-        df['data_vencimento']
+            df['data_do_pagamento'] -
+            df['data_vencimento']
     ).dt.days
 
     df['dias_lancamento_ate_pgto'] = (
-        df['data_do_pagamento'] -
+            df['data_do_pagamento'] -
             df['data_de_cadastro']
     ).dt.days
+
+    # ── Faixas de prazo para visuais de BI ───────────────────────────────────────
+
+    def _faixa_titulo_c_obra(dias: pd.Series) -> pd.Series:
+        """Quanto tempo a nota ficou fora do sistema antes de ser lançada."""
+        bins = [-1, 7, 15, 30, 60, float("inf")]
+        labels = ["A. Até 7d", "B. 8-15d", "C. 16-30d", "D. 31-60d", "E. Acima 60d"]
+        return pd.cut(dias.fillna(0), bins=bins, labels=labels, right=True).astype(str)
+
+    def _faixa_lancamento_ate_pgto(dias: pd.Series) -> pd.Series:
+        """
+        Ciclo lançamento → pagamento.
+        Negativo = pago antes do lançamento (retroativo) — o padrão encontrado na amostra.
+        Positivo = lançado antes do pagamento — fluxo esperado.
+        """
+        bins = [-float("inf"), -1, 0, 15, 30, float("inf")]
+        labels = [
+            "A. Retroativo (pago antes)",  # negativo — lançamento após o pagamento
+            "B. Mesmo dia",  # zero
+            "C. 1-15d",  # positivo curto
+            "D. 16-30d",  # positivo médio
+            "E. Acima 30d",  # positivo longo
+        ]
+        return pd.cut(dias.fillna(0), bins=bins, labels=labels, right=True).astype(str)
+
+    def _faixa_atraso_pgto(dias: pd.Series) -> pd.Series:
+        """
+        Atraso real no pagamento em relação ao vencimento.
+        Negativo = antecipado. Zero = no prazo. Positivo = em atraso.
+        """
+        bins = [-float("inf"), -1, 0, 7, 30, float("inf")]
+        labels = [
+            "A. Antecipado",  # pago antes do vencimento
+            "B. No prazo",  # pago no dia
+            "C. Atraso leve (1-7d)",
+            "D. Atraso médio (8-30d)",
+            "E. Atraso grave (30+d)",
+        ]
+        return pd.cut(dias.fillna(0), bins=bins, labels=labels, right=True).astype(str)
+
+    df["faixa_titulo_c_obra"] = _faixa_titulo_c_obra(df["dias_titulo_c_obra"])
+    df["faixa_lancamento_ate_pgto"] = _faixa_lancamento_ate_pgto(df["dias_lancamento_ate_pgto"])
+    df["faixa_atraso_pgto"] = _faixa_atraso_pgto(df["dias_atraso_pgto"])
+
+    # True quando o pagamento ocorreu ANTES do lançamento no sistema
+    df["flag_lancamento_retroativo"] = (
+            df["dias_lancamento_ate_pgto"].notna()
+            & (df["dias_lancamento_ate_pgto"] < 0)
+    )
 
     # ── 5. Carregar dimensões existentes ──────────────────────────────────────
     print("\n── 5. Carregando dimensões existentes ──────────────────────────────")
@@ -552,7 +602,6 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         df["saldo_total_fornecedor"]
     ).astype(str)
 
-
     print("\n── 10. fato_consulta_parcela ───────────────────────────────────────")
 
     fato = df[[
@@ -604,7 +653,9 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         "dias_ate_vencimento",
         "dias_atraso_pgto",
         "dias_lancamento_ate_pgto",
-
+        "faixa_titulo_c_obra",
+        "faixa_lancamento_ate_pgto",
+        "faixa_atraso_pgto",
 
         # ── Flags calculadas ──────────────────────────────────────
         "flag_vencida",
@@ -623,6 +674,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         "flag_venc_fds_paga_hoje",
         "flag_venceu_ontem",
         "flag_operacao_hoje",
+        "flag_lancamento_retroativo",
 
         # ── Atributos de workflow / auditoria ─────────────────────
         "ciencia_do_titulo",
@@ -695,7 +747,6 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         axis=1
     )
 
-
     cod_obras_especiais_str = set(
         dim_conta_cc.loc[~dim_conta_cc['tipo_documento'].isna(), 'cod_obra']
         .astype(int).astype(str)
@@ -721,7 +772,6 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
 
     # Sub-caso: documento comum → chave simples
     fato.loc[mask_simples, "chave_cc"] = _cod_obra_str[mask_simples]
-
 
     fato.loc[mask_composta, "chave_cc"] = (
             _cod_obra_str[mask_composta] + "_" + _doc_upper[mask_composta]
