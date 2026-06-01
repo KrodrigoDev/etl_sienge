@@ -37,7 +37,7 @@ DL_TIMEOUT = 120  # segundos máximos para aguardar download
 
 class SeleniumRequester:
 
-    def __init__(self, download_dir: Path | None = None, profile: str = 'Edge'):
+    def __init__(self, download_dir: Path | None = None, profile: str = 'Edge_Novo'):
 
         self.project_root = Path(__file__).resolve().parents[2]
 

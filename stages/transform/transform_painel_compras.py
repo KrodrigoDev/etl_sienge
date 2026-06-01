@@ -108,7 +108,7 @@ def executar(input_dir: Path = INPUT_DIR,
 
     dim_obra = dim_obra.merge(
         auxiliar_obra_gabriel[[
-            'Cod. Centro de Custo', 'Classificação 1', 'Classificação 2', 'Tipo de Obra', 'Tipo de Obra 2 '
+            'Cod. Centro de Custo', 'Classificação 1', 'Classificação 2', 'Tipo de Obra', 'Tipo de Obra 2 ', 'Centro de Custo 1', 'Centro de Custo 2'
         ]].rename(columns={
             'Classificação 1': 'filial',
             'Classificação 2': 'classificacao',

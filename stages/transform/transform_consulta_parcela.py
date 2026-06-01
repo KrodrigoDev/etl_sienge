@@ -371,9 +371,15 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     # ── Faixas de prazo para visuais de BI ───────────────────────────────────────
 
     def _faixa_titulo_c_obra(dias: pd.Series) -> pd.Series:
-        """Quanto tempo a nota ficou fora do sistema antes de ser lançada."""
-        bins = [-1, 7, 15, 30, 60, float("inf")]
-        labels = ["A. Até 7d", "B. 8-15d", "C. 16-30d", "D. 31-60d", "E. Acima 60d"]
+        bins = [-float("inf"), -1, 7, 15, 30, 60, float("inf")]
+        labels = [
+            "A. Negativo (lançado antes da emissão)",  # provável erro de data ou lançamento antecipado
+            "B. Até 7d",
+            "C. 8-15d",
+            "D. 16-30d",
+            "E. 31-60d",
+            "F. Acima 60d",
+        ]
         return pd.cut(dias.fillna(0), bins=bins, labels=labels, right=True).astype(str)
 
     def _faixa_lancamento_ate_pgto(dias: pd.Series) -> pd.Series:

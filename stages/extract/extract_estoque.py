@@ -27,6 +27,7 @@ import pandas as pd
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
 
 from src.drivers.selenium_requester import BASE_URL, SeleniumRequester
 
@@ -57,7 +58,7 @@ def extrair_estoque(
         # ── 2. Navega para o relatório de estoque ────────────────────────────
         logger.info("Navegando para o estoque de obras...")
         driver.get(URL_ESTOQUE)
-        sleep(2)
+        sleep(5)
 
         req.fechar_popup_novidade(wdw)
 
@@ -84,9 +85,10 @@ def extrair_estoque(
 
         # ── 4. Selecionar obras uma a uma ─────────────────────────────────────
         df_obras = pd.read_csv(
-            req.project_root / 'stages/extract/reference/obras_estoque.csv',
+            req.project_root / 'stages/extract/reference/obras_com_estoque.csv',
             sep=';',
         )
+
         lista_obras = df_obras['cod_obra'].dropna().astype(str).unique().tolist()
         logger.info("Total de obras: %s", len(lista_obras))
 
@@ -101,20 +103,24 @@ def extrair_estoque(
             input_obra.send_keys(f"{cod_obra} ")
 
             # Aguarda a opção aparecer no dropdown antes de limpar o campo
-            req.aguardar_presenca(
-                wdw,
-                (By.XPATH, f'//li[@role="option" and starts-with(normalize-space(), "{cod_obra} -")]'),
-            )
+            try:
+                req.aguardar_presenca(
+                    wdw,
+                    (By.XPATH, f'//li[@role="option" and starts-with(normalize-space(), "{cod_obra} -")]'),
+                )
 
-            req.aguardar_e_clicar(
-                wdw,
-                (By.XPATH, f'//li[@role="option" and starts-with(normalize-space(), "{cod_obra} -")]'),
-            )
+                req.aguardar_e_clicar(
+                    wdw,
+                    (By.XPATH, f'//li[@role="option" and starts-with(normalize-space(), "{cod_obra} -")]'),
+                )
 
-            input_obra.send_keys(Keys.CONTROL, "a")
-            input_obra.send_keys(Keys.DELETE)
+            except TimeoutException:
+                logger.info("A obra de cód %s não foi econtrada", cod_obra)
+            finally:
+                input_obra.send_keys(Keys.CONTROL, "a")
+                input_obra.send_keys(Keys.DELETE)
 
-            sleep(1)
+                sleep(1)
 
         req.scrollar_pagina(driver)
 
@@ -148,30 +154,52 @@ def extrair_estoque(
 
         # Aguarda o item aparecer visível antes de clicar — evita click em elemento
         # ainda não renderizado em headless
-        opcao_todas = wdw.until(
+        opcao_5000= wdw.until(
             EC.visibility_of_element_located(
-                (By.XPATH, '//li[@role="option" and contains(.,"Todas")]')  # ou "Todos" dependendo do extractor
+                (By.XPATH, '//li[@role="option" and contains(.,"5000")]')  # ou "Todos" dependendo do extractor
             )
         )
-        driver.execute_script("arguments[0].click();", opcao_todas)
+        driver.execute_script("arguments[0].click();", opcao_5000)
 
         req.aguardar_carregamento_tabela(driver)
-        sleep(3)
+        sleep(4)
 
-        # ── 8. Exporta CSV ────────────────────────────────────────────────────
-        logger.info("Exportando CSV do estoque...")
-        req.exportar_csv_modal(wdw)
+        pagina = 1
 
-        # ── 9. Aguarda download ───────────────────────────────────────────────
-        arquivo_baixado = req.aguardar_download(extensao=".csv")
+        while True:
+            # ── 8. Exporta CSV ────────────────────────────────────────────────────
+            logger.info("Exportando CSV do estoque...")
+            req.exportar_csv_modal(wdw)
 
-        # ── 10. Move para pasta de destino ────────────────────────────────────
-        nome_final = f"estoque_{date.today().year}.csv"
-        arquivo_final = destino / nome_final
-        shutil.move(str(arquivo_baixado), str(arquivo_final))
-        logger.info("Arquivo salvo em: %s", arquivo_final)
+            # ── 9. Aguarda download ───────────────────────────────────────────────
+            arquivo_baixado = req.aguardar_download(extensao=".csv")
 
-        return arquivo_final
+            # ── 10. Move para pasta de destino ────────────────────────────────────
+            nome_final = f"estoque_{pagina}_{date.today().year}.csv"
+            arquivo_final = destino / nome_final
+            shutil.move(str(arquivo_baixado), str(arquivo_final))
+            logger.info("Arquivo salvo em: %s", arquivo_final)
+
+            # ── Verifica se existe próxima página ──────────────────────────
+            try:
+                btn_proxima = driver.find_element(
+                    By.XPATH,
+                    '//button[@aria-label="Ir para a próxima página"]',
+                )
+            except Exception:
+                logger.info("Botão de próxima página não encontrado. Encerrando paginação.")
+                break
+
+            if btn_proxima.get_attribute("disabled") is not None:
+                logger.info("Última página atingida após página %d. Encerrando.", pagina)
+                break
+
+            # ── Vai para a próxima página ──────────────────────────────────
+            logger.info("Avançando para a página %d...", pagina + 1)
+            driver.execute_script("arguments[0].click();", btn_proxima)
+            pagina += 1
+            req.aguardar_carregamento_tabela(driver)
+            sleep(3)
 
 
     finally:
@@ -206,5 +234,4 @@ if __name__ == "__main__":
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
-    caminho = extrair_estoque()
-    print(f"Extração concluída: {caminho}")
+    extrair_estoque()
