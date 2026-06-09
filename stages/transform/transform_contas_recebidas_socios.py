@@ -406,17 +406,23 @@ def carregar_extrato(nome_empreendimento: str) -> set[str]:
     if not EXTRATO_PATH.exists():
         logger.warning("Extrato não encontrado → novo_cliente sempre 'N'")
         return set()
-    df = pd.read_excel(EXTRATO_PATH, sheet_name="UNIDADES", header=1)
+    df = pd.read_excel(EXTRATO_PATH, sheet_name="UNIDADES")
+
+    # tratar isso  da maneira que vem para não precisar apagar o dado de original (()
     df.columns = ["cnpj", "empreendimento", "contrato",
                   "nome_mutuario", "cpf", "dt_assinatura", "dt_cri"]
+
     df["dt_cri"] = pd.to_datetime(df["dt_cri"], errors="coerce")
     df["nome_up"] = df["nome_mutuario"].astype(str).str.strip().str.upper()
     chave = re.escape(nome_empreendimento.upper()[:15])
+
+
     df = df[df["empreendimento"].astype(str).str.upper().str.contains(chave, regex=True)]
     ini, fim, label = _mes_anterior()
     mask = (df["dt_cri"].dt.date >= ini) & (df["dt_cri"].dt.date <= fim)
     novos = set(df.loc[mask, "nome_up"].tolist())
     logger.info("Extrato [%s]: %d novo(s) em %s", nome_empreendimento, len(novos), label)
+
     return novos
 
 
@@ -446,6 +452,9 @@ def ler_vgv_clientes() -> pd.DataFrame:
 
 def ler_contas_a_receber() -> pd.DataFrame:
     files = (BASE_INPUT_DIR / "contas_a_receber").glob("*.xlsx*")
+
+
+
     arquivos = []
 
     for file in files:
@@ -1194,7 +1203,7 @@ def transformar_centro(centro: dict, novos: set[str], contas_a_receber, comp: di
     pct = float(centro.get("pct_repasse") or 0)
     _, _, colunas_num = _layout(centro)
 
-    dir_brutos = BASE_INPUT_DIR / "contas_recebidas" / slug_cc / "dados_brutos"
+    dir_brutos = BASE_INPUT_DIR / "contas_recebidas" / slug_cc / "socios"
     dir_consol = BASE_OUTPUT_DIR / nome_pasta_cc / comp["ano"] / comp["mes_ref"]
 
     dir_consol.mkdir(parents=True, exist_ok=True)
@@ -1400,7 +1409,9 @@ def main() -> None:
     resultados = []
     contas_a_receber = ler_contas_a_receber()
 
+
     comp = _obter_competencia()
+    print(comp)
     for centro in centros:
         nome_cc = str(centro["centro_custo"]).strip()
         try:

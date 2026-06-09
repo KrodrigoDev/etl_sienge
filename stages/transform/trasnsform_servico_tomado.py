@@ -36,7 +36,7 @@ dim_credor_receita = pd.read_csv(OUTPUT_DIR / 'dim_credor_receita.csv', sep=';')
 
 df_sienge = pd.merge(df_titulo, dim_credor_receita, on='credor', how='left')
 
-files = (INPUT_DIR / 'servico_tomado').rglob('*.csv*')
+files = (INPUT_DIR / 'servico_tomado' / '05.06.2026').rglob('*.csv*') # alterar a data sempre que for atualizar
 df_giss = pd.concat([pd.read_csv(f, sep=';', decimal=',') for f in files],
                     ignore_index=True, )
 

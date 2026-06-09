@@ -13,7 +13,6 @@ import sys
 import time
 from datetime import date
 from pathlib import Path
-from typing import Tuple
 
 sys.stdout.reconfigure(encoding="utf-8")
 sys.stderr.reconfigure(encoding="utf-8")
@@ -366,7 +365,7 @@ def etapa_transform() -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def painel_consultas() -> None:
-    ok_parcela = etapa_extract_consulta_parcela("01/01/2026")
+    ok_parcela = etapa_extract_consulta_parcela("01/01/2024")
     ok_titulo, titulo_skip = etapa_extract_titulo()
 
     falhas = []

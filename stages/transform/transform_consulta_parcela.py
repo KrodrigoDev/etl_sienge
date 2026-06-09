@@ -491,6 +491,12 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         "pix_tipo_chave", "pix_chave", "forma_pagamento_padrao",
     ], nome_id='id_fornecedor')
 
+    dim_fornecedor['nome_fornecedor_cod'] = (
+            dim_fornecedor['cod_credor'].astype(str)
+            + ' - '
+            + dim_fornecedor['nome_fornecedor']
+    )
+    
     # ── 8. Dimensões pequenas (geradas/sobrescritas integralmente aqui) ───────
     print("\n── 8. Dimensões de domínio ─────────────────────────────────────────")
 

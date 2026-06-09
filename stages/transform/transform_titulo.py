@@ -357,4 +357,4 @@ if __name__ == '__main__':
         format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
     )
 
-    executar()
+    executar(comparativo_receita=True)

@@ -34,7 +34,7 @@ URL_BASE = "https://maceio.giss.com.br/portal/home"
 
 pasta_origem = Path(__file__).resolve().parents[2]
 
-INPUT_DIR = pasta_origem / 'stages' / 'transform' / 'input' / 'servico_tomado'
+INPUT_DIR = pasta_origem / 'stages' / 'transform' / 'input' / 'servico_tomado' / '05.06.2026'
 INPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -325,7 +325,29 @@ def clicar_consultar(driver, wdw, req) -> None:
 
     garantir_sem_backdrop(driver, wdw)
 
-    req.aguardar_e_clicar(wdw, locator=(By.ID, "botaoConsultar"))
+    # Aguarda o overlay de loading desaparecer antes de clicar
+    try:
+        wdw.until(
+            EC.invisibility_of_element_located(
+                (By.CSS_SELECTOR, "div[loader].loading")
+            )
+        )
+    except Exception:
+        # Se não encontrar o seletor, tenta via JS mesmo assim
+        driver.execute_script("""
+            document.querySelectorAll('div[loader]').forEach(el => {
+                el.style.display = 'none';
+            });
+        """)
+
+    pausa_humana(0.5, 1.0)
+
+    # Clique via JS evita ElementClickInterceptedException
+    botao = wdw.until(
+        EC.presence_of_element_located((By.ID, "botaoConsultar"))
+    )
+    driver.execute_script("arguments[0].click();", botao)
+
     pausa_humana(2.0, 4.0)
 
 
@@ -541,7 +563,7 @@ def processar_empresa(driver, wdw, req, cnpj: str, competencia: str, novo_cnpj: 
 
 
 MES_INICIAL = 1
-MES_FINAL = 5
+MES_FINAL = 6
 
 
 def main():
@@ -564,7 +586,7 @@ def main():
 
         path_cnpj = INPUT_DIR / cnpj_normalizado
 
-        if path_cnpj.exists() and len(list(path_cnpj.glob('*.csv*'))) > 1:
+        if path_cnpj.exists() and len(list(path_cnpj.glob('*.csv*'))) >= 3:
             logger.info(f'Pulando o {cnpj} por já existir')
             continue
 

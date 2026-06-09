@@ -1,4 +1,6 @@
 """
+Observação: A consulta foi migrada para o consumo direto da api no dia 03/06/2026
+
 stages/extract/extract_painel_compras.py
 -----------------------------------------
 Extrai o relatório de Painel de Compras do SIENGE e salva como CSV.
@@ -110,7 +112,7 @@ def extrair_consulta_parcela(
         destino: Path | None = None,
 ):
     if data_inicio is None:
-        data_inicio = f"01/01/2026"
+        data_inicio = f"01/01/2024"
 
     req = SeleniumRequester()
     req.ensure_login()
@@ -140,7 +142,7 @@ def extrair_consulta_parcela(
             data_inicio,
         )
 
-        data_final = f"31/12/{date.today().year}"
+        data_final = f"31/12/2040"
         logger.info("Preenchendo data final: %s", data_final)
         _preencher_campo_data(
             driver, wdw,
@@ -236,7 +238,7 @@ def extrair_consulta_parcela(
                 )
 
             # ── Move para pasta de destino ─────────────────────────────────
-            nome_final = f"consulta_parcela_{pagina}_{date.today().year}.csv"
+            nome_final = f"consulta_parcela_{pagina}.csv"
             arquivo_final = destino / nome_final
             shutil.move(str(arquivo_baixado), str(arquivo_final))
             logger.info("Arquivo salvo em: %s", arquivo_final)
