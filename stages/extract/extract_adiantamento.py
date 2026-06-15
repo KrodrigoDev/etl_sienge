@@ -185,14 +185,14 @@ def extrair_adiantamento(
         except Exception:
             pass
 
-        try:
-            subprocess.run(
-                ["taskkill", "/F", "/IM", "msedge.exe", "/T"],
-                capture_output=True,
-            )
-            logger.info("Processos msedge encerrados via taskkill.")
-        except Exception as e_kill:
-            logger.warning("taskkill falhou: %s", e_kill)
+        # try:
+        #     subprocess.run(
+        #         ["taskkill", "/F", "/IM", "msedge.exe", "/T"],
+        #         capture_output=True,
+        #     )
+        #     logger.info("Processos msedge encerrados via taskkill.")
+        # except Exception as e_kill:
+        #     logger.warning("taskkill falhou: %s", e_kill)
 
         logger.info("Driver encerrado.")
 

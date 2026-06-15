@@ -11,6 +11,7 @@ import logging
 import random
 from pathlib import Path
 from time import sleep
+from datetime import datetime
 import os
 import re
 
@@ -19,9 +20,9 @@ from dotenv import load_dotenv
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import Select
+from selenium.webdriver.support.ui import Select, WebDriverWait
 from selenium.webdriver.common.action_chains import ActionChains
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, InvalidSessionIdException, WebDriverException
 
 from src.drivers.selenium_requester import SeleniumRequester
 
@@ -34,11 +35,31 @@ URL_BASE = "https://maceio.giss.com.br/portal/home"
 
 pasta_origem = Path(__file__).resolve().parents[2]
 
-INPUT_DIR = pasta_origem / 'stages' / 'transform' / 'input' / 'servico_tomado' / '05.06.2026'
+dia_extracao = datetime.now().strftime("%d.%m.%Y")
+
+INPUT_DIR = pasta_origem / 'stages' / 'transform' / 'input' / 'servico_tomado' / "12.06.2026"
 INPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ── Helpers  ───────────────────────────────────────────────────
+
+def keepalive(driver) -> None:
+    """Executa JS trivial para manter a sessão viva."""
+    try:
+        driver.execute_script("return document.title;")
+    except Exception:
+        pass
+
+
+def reiniciar_driver(req, driver):
+    try:
+        driver.quit()
+    except Exception:
+        pass
+    novo_driver = req.get_driver()
+    novo_wdw = req.waiter(novo_driver)
+    return novo_driver, novo_wdw
+
 
 def normalizar_cnpj(cnpj: str) -> str:
     return re.sub(r'\D', '', cnpj)
@@ -293,7 +314,7 @@ def selecionar_empresa(driver, wdw, cnpj: str) -> bool:
         pausa_humana(0.5, 1.2)
         mover_mouse_e_clicar(driver, botao)
         logger.info(f"Empresa selecionada: {cnpj}")
-        pausa_humana(2.0, 4.0)  # aguarda carregamento pós-clique
+        pausa_humana(0.5, 1.5)  # aguarda carregamento pós-clique
         return True
 
     except Exception as e:
@@ -307,7 +328,7 @@ def acessar_servicos_tomados(driver) -> None:
     driver.get(f"{URL_BASE}#/operacao/servicos-comprados")
     pausa_humana(2.0, 3.5)
     driver.get(f"{URL_BASE}#/operacao/servicos-comprados/consultar-nfse")
-    pausa_humana(2.0, 4.0)
+    pausa_humana(0.5, 1.5)
 
 
 def preencher_filtro_periodo(driver, competencia: str) -> None:
@@ -322,7 +343,6 @@ def preencher_filtro_periodo(driver, competencia: str) -> None:
 
 
 def clicar_consultar(driver, wdw, req) -> None:
-
     garantir_sem_backdrop(driver, wdw)
 
     # Aguarda o overlay de loading desaparecer antes de clicar
@@ -348,7 +368,7 @@ def clicar_consultar(driver, wdw, req) -> None:
     )
     driver.execute_script("arguments[0].click();", botao)
 
-    pausa_humana(2.0, 4.0)
+    pausa_humana(0.5, 1.5)
 
 
 def ajustar_paginacao(driver, wdw, tamanho: str = "50") -> None:
@@ -414,7 +434,7 @@ def extrair_todas_paginas(driver, wdw) -> list[dict]:
 
         # aguarda nova página carregar (espera as linhas mudarem)
         pagina += 1
-        pausa_humana(2.0, 4.0)
+        pausa_humana(0.5, 1.5)
 
         try:
             wdw.until(
@@ -475,53 +495,36 @@ def extrair_notas_tabela(driver) -> list[dict]:
     return notas
 
 
-def remover_aviso(driver, wdw) -> bool:
-    """
-    Fecha o popup SweetAlert caso apareça após a consulta.
-
-    Retorna:
-        True  -> aviso apareceu e foi fechado
-        False -> aviso não apareceu
-    """
-
+def remover_aviso(driver, wdw, timeout_aviso: int = 5) -> bool:
+    """Usa timeout curto para não travar quando não há aviso."""
+    wdw_rapido = WebDriverWait(driver, timeout_aviso)
     try:
         logger.info("Verificando aviso de ausência de notas...")
-
-        # aguarda o modal aparecer
-        botao_ok = wdw.until(
-            EC.presence_of_element_located(
-                (
-                    By.XPATH,
-                    '//div[contains(@class,"sweet-alert") and contains(@class,"visible")]'
-                    '//button[contains(@class,"confirm") and normalize-space()="Ok"]'
-                )
-            )
+        botao_ok = wdw_rapido.until(
+            EC.presence_of_element_located((
+                By.XPATH,
+                '//div[contains(@class,"sweet-alert") and contains(@class,"visible")]'
+                '//button[contains(@class,"confirm") and normalize-space()="Ok"]'
+            ))
         )
-
         pausa_humana(0.5, 1.2)
-
-        scroll_humano(driver, botao_ok)
-
-        # clique via JS evita problema de overlay
         driver.execute_script("arguments[0].click();", botao_ok)
-
         logger.info("Aviso encontrado e fechado.")
         pausa_humana(1.0, 2.0)
-
         garantir_sem_backdrop(driver, wdw)
-
         return True
 
     except TimeoutException:
         logger.info("Nenhum aviso encontrado.")
         return False
-
     except Exception as e:
         logger.warning(f"Erro ao remover aviso: {e}")
         return False
 
 
 def processar_empresa(driver, wdw, req, cnpj: str, competencia: str, novo_cnpj: bool = True) -> list[dict]:
+    keepalive(driver)
+
     logger.info(f"\n{'=' * 60}")
     logger.info(f"Processando CNPJ: {cnpj} | Competência: {competencia}")
     logger.info(f"{'=' * 60}")
@@ -530,10 +533,9 @@ def processar_empresa(driver, wdw, req, cnpj: str, competencia: str, novo_cnpj: 
         driver.get(f"{URL_BASE}#/login-portal")
         fechar_modal(driver)
         fazer_login(driver)
-        pausa_humana(2.0, 4.0)
+        pausa_humana(0.5, 1.5)
 
         mostrar_itens_empresa(wdw)
-
 
         ok = selecionar_empresa(driver, wdw, cnpj)
         if not ok:
@@ -563,7 +565,7 @@ def processar_empresa(driver, wdw, req, cnpj: str, competencia: str, novo_cnpj: 
 
 
 MES_INICIAL = 1
-MES_FINAL = 6
+MES_FINAL = 5
 
 
 def main():
@@ -579,6 +581,20 @@ def main():
 
     dfs = []
 
+    def salvar_notas(notas: list[dict], path_notas: Path, cnpj: str, mes: int) -> None:
+        if notas:
+            df_cnpj = pd.DataFrame(notas)
+            df_cnpj['cnpj_empresa'] = cnpj
+            df_cnpj.to_csv(
+                path_notas / f'competencia_{mes:02d}-2026.csv',
+                index=False,
+                sep=';'
+            )
+            dfs.append(df_cnpj)
+            logger.info(f"{cnpj} | {mes:02d}/2026: {len(notas)} notas salvas")
+        else:
+            logger.info(f"{cnpj} | {mes:02d}/2026: sem notas")
+
     for emp in empresas:
         cnpj = emp['cnpj']
 
@@ -586,13 +602,24 @@ def main():
 
         path_cnpj = INPUT_DIR / cnpj_normalizado
 
-        if path_cnpj.exists() and len(list(path_cnpj.glob('*.csv*'))) >= 3:
-            logger.info(f'Pulando o {cnpj} por já existir')
+        arquivos_csv = list(path_cnpj.glob('competencia_*.csv'))
+        print(path_cnpj.exists())
+        print('validacação')
+        qtd_arquivos = len(arquivos_csv)
+        print(qtd_arquivos)
+        if path_cnpj.exists() and qtd_arquivos >= 5:
+            logger.info(f'Pulando {cnpj} — {qtd_arquivos} competências já extraídas')
             continue
 
         path_cnpj.mkdir(parents=True, exist_ok=True)
 
         for mes in range(MES_INICIAL, MES_FINAL + 1):
+
+            arquivo_mes = path_cnpj / f'competencia_{mes:02d}-2026.csv'
+            if arquivo_mes.exists():
+                logger.info(f"  Pulando {cnpj} | {mes:02d}/2026 — já extraído")
+                continue
+
             try:
                 notas = processar_empresa(
                     driver, wdw, req,
@@ -601,26 +628,31 @@ def main():
                     novo_cnpj=(mes == MES_INICIAL),
                 )
 
-                if notas:
-                    df_cnpj = pd.DataFrame(notas)
-                    df_cnpj['cnpj_empresa'] = cnpj
+                salvar_notas(notas, path_cnpj, cnpj, mes)
 
-                    df_cnpj.to_csv(
-                        path_cnpj / f'competencia_{mes:02d}-2026.csv',
-                        index=False,
-                        sep=';'
+
+            except (InvalidSessionIdException, WebDriverException) as e:
+                logger.error(f"Sessão inválida em {cnpj} {mes:02d}/2026 — reiniciando driver.")
+                driver, wdw = reiniciar_driver(req, driver)
+
+                # Retenta a mesma competência com novo_cnpj=True
+                try:
+                    notas = processar_empresa(
+                        driver, wdw, req, cnpj,
+                        competencia=f'{mes:02d}/2026',
+                        novo_cnpj=(mes == MES_INICIAL),
                     )
-                    dfs.append(df_cnpj)
-                    logger.info(f"{cnpj} | {mes:02d}/2026: {len(notas)} notas salvas")
-                else:
-                    logger.info(f"{cnpj} | {mes:02d}/2026: sem notas")
+
+                    salvar_notas(notas, path_cnpj, cnpj, mes)
+
+
+                except Exception as e2:
+                    logger.exception(f"Falhou após reinício: {e2}")
 
             except Exception as e:
                 logger.exception(f"Erro ao processar {cnpj} competência {mes:02d}/2026: {e}")
 
-            pausa_humana(3.0, 10.0)
-
-        pausa_humana(3.0, 10.0)  # pausa entre empresas
+            pausa_humana(0.5, 1.5)
 
     return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
 

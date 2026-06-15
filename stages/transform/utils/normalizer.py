@@ -37,6 +37,7 @@ def ler_dados(arquivos, formato:str='csv', salto:int=0) -> pd.DataFrame:
     """Lê e concatena todos os CSVs de um glob em um único DataFrame."""
     dfs = []
     for arq in arquivos:
+        print(f"Lendo: {arq.name}")
         if formato == 'csv':
             df = pd.read_csv(arq, sep=';', low_memory=False)
         elif formato == 'excel':
@@ -225,3 +226,17 @@ def checar_integridade(
     orphans = fks - pks
     status = "✓" if not orphans else f"ATENÇÃO → {list(orphans)[:5]}"
     print(f"  [{nome}] orphans: {len(orphans)} {status}")
+
+
+def _extrair_credor(valor: str) -> tuple[str | None, str | None]:
+    """
+    '1 - O2 ENGENHARIA LTDA - EPP'
+    → credor_cod='1', credor_nome='O2 ENGENHARIA LTDA - EPP'
+    """
+    valor = str(valor).strip()
+
+    if ' - ' in valor:
+        cod, nome = valor.split(' - ', 1)
+        return cod.strip(), nome.strip()
+
+    return None, valor

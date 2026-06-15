@@ -8,6 +8,7 @@ from stages.transform.utils.normalizer import (
     ler_dados,
     normalizar_colunas,
     salvar_tabela,
+    extrair_credor
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -20,19 +21,6 @@ INPUT_DIR = pasta_origem / 'stages' / 'transform' / 'input'
 OUTPUT_DIR = pasta_origem / 'stages' / 'transform' / 'output'
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-
-def _extrair_credor(valor: str) -> tuple[str | None, str | None]:
-    """
-    '1 - O2 ENGENHARIA LTDA - EPP'
-    → credor_cod='1', credor_nome='O2 ENGENHARIA LTDA - EPP'
-    """
-    valor = str(valor).strip()
-
-    if ' - ' in valor:
-        cod, nome = valor.split(' - ', 1)
-        return cod.strip(), nome.strip()
-
-    return None, valor
 
 
 def executar(
@@ -67,13 +55,12 @@ def executar(
     df_bruto.loc[:, 'credor_nome'] = pd.NA
 
     for index, row in df_bruto.iterrows():
-        credor_cod, credor_nome = _extrair_credor(row['credor'])
+        credor_cod, credor_nome = extrair_credor(row['credor'])
 
         df_bruto.loc[index, 'credor_cod'] = credor_cod
         df_bruto.loc[index, 'credor_nome'] = credor_nome
         df_bruto.loc[index, 'credor'] = str(row['credor']).strip()
 
-    # Exemplo de salvamento
     salvar_tabela(df=df_bruto, nome='dim_credor_receita', destino=output_dir)
 
 

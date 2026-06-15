@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import logging
 import shutil
-import subprocess
 from datetime import date
 from pathlib import Path
 from time import sleep
@@ -63,64 +62,64 @@ def extrair_estoque(
         req.fechar_popup_novidade(wdw)
 
         # ── 3. Limpa obras selecionadas anteriormente ─────────────────────────
-        req.aguardar_e_clicar(
-            wdw,
-            (By.XPATH, '//input[@placeholder="Pesquisar obra"]'),
-            "Campo Obras",
-        )
+        # req.aguardar_e_clicar(
+        #     wdw,
+        #     (By.XPATH, '//input[@placeholder="Pesquisar obra"]'),
+        #     "Campo Obras",
+        # )
+        #
+        # # Aguarda o botão Limpar aparecer no DOM (mais confiável que sleep fixo).
+        # # Se não aparecer em 5s, assume que não há filtros para limpar.
+        # logger.info("Verificando se existe filtro de obras para limpar...")
+        # try:
+        #     from selenium.webdriver.support.wait import WebDriverWait
+        #     req.aguardar_e_clicar(
+        #         WebDriverWait(driver, 5),
+        #         (By.XPATH, '//button[@aria-label="Limpar"]'),
+        #         "Botão Limpar obras",
+        #     )
+        #     logger.info("Filtro de obras limpo com sucesso.")
+        # except Exception:
+        #     logger.info("Nenhum filtro de obras para limpar.")
+        #
+        # # ── 4. Selecionar obras uma a uma ─────────────────────────────────────
+        # df_obras = pd.read_csv(
+        #     req.project_root / 'stages/extract/reference/obras_com_estoque.csv',
+        #     sep=';',
+        # )
+        #
+        # lista_obras = df_obras['cod_obra'].dropna().astype(str).unique().tolist()
+        # logger.info("Total de obras: %s", len(lista_obras))
+        #
+        # for cod_obra in lista_obras:
+        #     logger.info("Selecionando obra: %s", cod_obra)
+        #
+        #     input_obra = req.aguardar_e_clicar(
+        #         wdw,
+        #         (By.XPATH, '//input[@placeholder="Pesquisar obra"]'),
+        #         "Campo Obras",
+        #     )
+        #     input_obra.send_keys(f"{cod_obra} ")
 
-        # Aguarda o botão Limpar aparecer no DOM (mais confiável que sleep fixo).
-        # Se não aparecer em 5s, assume que não há filtros para limpar.
-        logger.info("Verificando se existe filtro de obras para limpar...")
-        try:
-            from selenium.webdriver.support.wait import WebDriverWait
-            req.aguardar_e_clicar(
-                WebDriverWait(driver, 5),
-                (By.XPATH, '//button[@aria-label="Limpar"]'),
-                "Botão Limpar obras",
-            )
-            logger.info("Filtro de obras limpo com sucesso.")
-        except Exception:
-            logger.info("Nenhum filtro de obras para limpar.")
-
-        # ── 4. Selecionar obras uma a uma ─────────────────────────────────────
-        df_obras = pd.read_csv(
-            req.project_root / 'stages/extract/reference/obras_com_estoque.csv',
-            sep=';',
-        )
-
-        lista_obras = df_obras['cod_obra'].dropna().astype(str).unique().tolist()
-        logger.info("Total de obras: %s", len(lista_obras))
-
-        for cod_obra in lista_obras:
-            logger.info("Selecionando obra: %s", cod_obra)
-
-            input_obra = req.aguardar_e_clicar(
-                wdw,
-                (By.XPATH, '//input[@placeholder="Pesquisar obra"]'),
-                "Campo Obras",
-            )
-            input_obra.send_keys(f"{cod_obra} ")
-
-            # Aguarda a opção aparecer no dropdown antes de limpar o campo
-            try:
-                req.aguardar_presenca(
-                    wdw,
-                    (By.XPATH, f'//li[@role="option" and starts-with(normalize-space(), "{cod_obra} -")]'),
-                )
-
-                req.aguardar_e_clicar(
-                    wdw,
-                    (By.XPATH, f'//li[@role="option" and starts-with(normalize-space(), "{cod_obra} -")]'),
-                )
-
-            except TimeoutException:
-                logger.info("A obra de cód %s não foi econtrada", cod_obra)
-            finally:
-                input_obra.send_keys(Keys.CONTROL, "a")
-                input_obra.send_keys(Keys.DELETE)
-
-                sleep(1)
+            # # Aguarda a opção aparecer no dropdown antes de limpar o campo
+            # try:
+            #     req.aguardar_presenca(
+            #         wdw,
+            #         (By.XPATH, f'//li[@role="option" and starts-with(normalize-space(), "{cod_obra} -")]'),
+            #     )
+            #
+            #     req.aguardar_e_clicar(
+            #         wdw,
+            #         (By.XPATH, f'//li[@role="option" and starts-with(normalize-space(), "{cod_obra} -")]'),
+            #     )
+            #
+            # except TimeoutException:
+            #     logger.info("A obra de cód %s não foi econtrada", cod_obra)
+            # finally:
+            #     input_obra.send_keys(Keys.CONTROL, "a")
+            #     input_obra.send_keys(Keys.DELETE)
+            #
+            #     sleep(1)
 
         req.scrollar_pagina(driver)
 
@@ -207,20 +206,6 @@ def extrair_estoque(
         try:
 
             driver.quit()
-
-        except Exception:
-
-            pass
-
-        try:
-
-            subprocess.run(
-
-                ["taskkill", "/F", "/IM", "msedge.exe", "/T"],
-
-                capture_output=True,
-
-            )
 
         except Exception:
 

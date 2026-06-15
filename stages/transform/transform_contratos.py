@@ -229,6 +229,9 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     # ── 9. Exportação ─────────────────────────────────────────────────────────
     print("\n── 9. Exportação ───────────────────────────────────────────────────")
 
+    # ao baixar muitos contratos acaba vindo duplicidades, logo é necessário retirar
+    fato_contrato.drop_duplicates(subset='id_contrato', inplace=True)
+
     salvar_tabela(dim_fornecedor, 'dim_fornecedor', output_dir)  # expandida
     salvar_tabela(dim_contrato, 'dim_contrato', output_dir)
     salvar_tabela(dim_empresa, 'dim_empresa', output_dir)  # nova
