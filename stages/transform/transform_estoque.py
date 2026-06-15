@@ -68,6 +68,9 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     df_est = ler_dados((input_dir / 'estoque').glob('*.csv'))
     df_est = normalizar_colunas(df_est)
 
+    # obras fora do nosso controle
+    df_est = df_est[~df_est['codigo_obra'].isin([12, 24])]
+
     # Remove linha de totais (última linha com Código Obra nulo)
     df_est = df_est.dropna(subset=['codigo_obra'])
 
@@ -107,6 +110,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     dim_obra = pd.read_csv(output_dir / 'dim_obra.csv', sep=';')
     dim_insumo = pd.read_csv(output_dir / 'dim_insumo.csv', sep=';')
     dim_grupo_insumo = pd.read_csv(output_dir / 'dim_grupo_insumo.csv', sep=';')
+    auxiliar_obra_gabriel = pd.read_csv(REFERENCE_DIR / 'auxiliar_gabriel.csv', sep=',')
 
     print(f"  dim_obra:         {dim_obra.shape}")
     print(f"  dim_insumo:       {dim_insumo.shape}")
@@ -125,6 +129,25 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         nome_id='id_obra',
         col_pk_natural='cod_obra',
     )
+
+    dim_obra.drop(
+        columns=['filial', 'classificacao', 'tipo_obra', 'tipo_obra_2', 'Centro de Custo 1', 'Centro de Custo 2'],
+        inplace=True)
+
+    dim_obra = dim_obra.merge(
+        auxiliar_obra_gabriel[[
+            'Cod. Centro de Custo', 'Classificação 1', 'Classificação 2', 'Tipo de Obra', 'Tipo de Obra 2 ',
+            'Centro de Custo 1', 'Centro de Custo 2'
+        ]].rename(columns={
+            'Classificação 1': 'filial',
+            'Classificação 2': 'classificacao',
+            'Tipo de Obra': 'tipo_obra',
+            'Tipo de Obra 2 ': 'tipo_obra_2',
+            'Cod. Centro de Custo': '_cod_join',
+        }).drop_duplicates(subset='_cod_join'),
+
+        left_on='cod_obra', right_on='_cod_join', how='left'
+    ).drop(columns='_cod_join', errors='ignore')
 
     # Garantindo que os insumos do estoque tenham seus tipos de grupo preenchidos
 

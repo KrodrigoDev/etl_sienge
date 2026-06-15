@@ -108,7 +108,7 @@ def executar(input_dir: Path = INPUT_DIR,
 
     dim_obra = dim_obra.merge(
         auxiliar_obra_gabriel[[
-            'Cod. Centro de Custo', 'Classificação 1', 'Classificação 2', 'Tipo de Obra', 'Tipo de Obra 2 '
+            'Cod. Centro de Custo', 'Classificação 1', 'Classificação 2', 'Tipo de Obra', 'Tipo de Obra 2 ', 'Centro de Custo 1', 'Centro de Custo 2'
         ]].rename(columns={
             'Classificação 1': 'filial',
             'Classificação 2': 'classificacao',
@@ -254,7 +254,7 @@ def executar(input_dir: Path = INPUT_DIR,
     )
     fato_solicitacao_item['dias_solicitacao_ate_pedido'] = (
             fato_solicitacao_item['data_do_pedido'] -
-            fato_solicitacao_item['data_da_solicitacao']
+            fato_solicitacao_item['data_autorizacao_da_solicitacao']
     ).dt.days
     fato_solicitacao_item['dias_atraso_entrega'] = (
             fato_solicitacao_item['data_entrega_na_obra'] -

@@ -162,19 +162,19 @@ def extrair_servicos(
 
             pass
 
-        try:
-
-            subprocess.run(
-
-                ["taskkill", "/F", "/IM", "msedge.exe", "/T"],
-
-                capture_output=True,
-
-            )
-
-        except Exception:
-
-            pass
+        # try:
+        #
+        #     subprocess.run(
+        #
+        #         ["taskkill", "/F", "/IM", "msedge.exe", "/T"],
+        #
+        #         capture_output=True,
+        #
+        #     )
+        #
+        # except Exception:
+        #
+        #     pass
 
         logger.info("Driver encerrado.")
 

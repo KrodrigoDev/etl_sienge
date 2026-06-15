@@ -224,7 +224,7 @@ def _build_dim_titulo_obra(
     # Enriquece com tipo_obra da tabela de referência
     dim = pd.merge(
         dim,
-        df_auxiliar[['Cod. Centro de Custo', 'Tipo de Obra 2 ']].rename(columns={
+        df_auxiliar[['Centro de Custo 1', 'Centro de Custo 2', 'Cod. Centro de Custo', 'Tipo de Obra 2 ']].rename(columns={
             'Cod. Centro de Custo': 'cod_obra',
             'Tipo de Obra 2 ': 'tipo_obra',
         }),
@@ -284,11 +284,14 @@ def _build_dim_titulo_obra_dedup(dim_titulo_obra: pd.DataFrame) -> pd.DataFrame:
 def executar(
         input_dir: Path = INPUT_DIR,
         output_dir: Path = OUTPUT_DIR,
+        comparativo_receita: bool = False
 ) -> None:
     # ── 1. Leitura ────────────────────────────────────────────────────────────
     print("\n── 1. Leitura (titulos) ──────────────────────────────────────────")
 
-    arquivos = list((input_dir / 'titulo').glob('*.xlsx'))
+    caminho = (input_dir / 'titulo' / 'comparativo_receita') if comparativo_receita else (input_dir / 'titulo')
+
+    arquivos = list(caminho.glob('*.xlsx'))
     df_bruto = ler_dados(arquivos=arquivos, formato='excel', salto=0)
 
     # Remove linhas completamente vazias (Unnamed: 0 nulo = rodapé/espaçador)
@@ -353,4 +356,5 @@ if __name__ == '__main__':
         level=logging.INFO,
         format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
     )
-    executar()
+
+    executar(comparativo_receita=True)

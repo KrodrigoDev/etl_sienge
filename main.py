@@ -13,7 +13,6 @@ import sys
 import time
 from datetime import date
 from pathlib import Path
-from typing import Tuple
 
 sys.stdout.reconfigure(encoding="utf-8")
 sys.stderr.reconfigure(encoding="utf-8")
@@ -199,6 +198,18 @@ def etapa_extract_consulta_parcela(data_inicio: str) -> bool:
     )
 
 
+def etapa_extract_curva_abc_apropriacao() -> bool:
+    from stages.extract.extract_curva_abc_apropriacao import extrair_curva_abc
+
+    _secao("EXTRACT — CURVA ABC")
+    return _com_retry(
+        nome="extract_consulta_parcela",
+        fn=lambda: extrair_curva_abc(
+            destino=INPUT_DIR / "curva_abc_apropriacao",
+        ),
+    )
+
+
 def etapa_extract_titulo() -> tuple[bool, bool]:
     """
     Executa o extract de títulos com skip automático se já foi rodado hoje.
@@ -248,6 +259,18 @@ def etapa_extract_permissao_usuario() -> bool:
     )
 
 
+def etapa_extract_avaliacao_fornecedor() -> bool:
+    from stages.extract.extract_avaliacoes_fornecedores import extrair_avaliacoes_fornecedores
+
+    _secao("EXTRACT — Extrair Informações Gerais do Usuário")
+    return _com_retry(
+        nome="extrair_avaliacao_fornecedores",
+        fn=lambda: extrair_avaliacoes_fornecedores(
+            destino=INPUT_DIR / "avaliacao_fornecedor",
+        ),
+    )
+
+
 def etapa_extract(data_inicio: str) -> None:
     """Roda todos os extractors na ordem definida."""
     etapa_extract_painel_compras(data_inicio)
@@ -268,6 +291,14 @@ def etapa_transform_painel_compras() -> None:
 
     _secao("TRANSFORM — painel_compras")
     executar(input_dir=INPUT_DIR, reference_dir=REFERENCE_DIR, output_dir=OUTPUT_DIR)
+    logger.info("Transform painel_compras concluído.")
+
+
+def etapa_transform_avaliacao_fornecedor() -> None:
+    from stages.transform.transform_avaliacao_fornecedor import executar
+
+    _secao("TRANSFORM — painel_compras")
+    executar(input_dir=INPUT_DIR, output_dir=OUTPUT_DIR)
     logger.info("Transform painel_compras concluído.")
 
 
@@ -331,6 +362,14 @@ def etapa_transform_usuario() -> None:
     logger.info("Transform usuário concluído.")
 
 
+def etapa_transform_curva_abc_apropriacao() -> None:
+    from stages.transform.transform_curva_abc_apropriacao import executar
+
+    _secao("TRANSFORM — Curva ABC")
+    executar(input_dir=INPUT_DIR, output_dir=OUTPUT_DIR)
+    logger.info("Transform Curva ABC concluído.")
+
+
 def etapa_transform() -> None:
     etapa_transform_painel_compras()
     etapa_transform_estoque()
@@ -346,7 +385,7 @@ def etapa_transform() -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def painel_consultas() -> None:
-    ok_parcela = etapa_extract_consulta_parcela("01/01/2026")
+    ok_parcela = etapa_extract_consulta_parcela("01/01/2024")
     ok_titulo, titulo_skip = etapa_extract_titulo()
 
     falhas = []
@@ -360,14 +399,15 @@ def painel_consultas() -> None:
         return
 
     etapa_transform_consulta_parcela()
+    etapa_transform_titulo()
 
-    if titulo_skip:
-        logger.info(
-            "transform_titulo ignorado — extract_titulo não rodou hoje "
-            "(output em disco já está atualizado)."
-        )
-    else:
-        etapa_transform_titulo()
+    # if titulo_skip:
+    #     logger.info(
+    #         "transform_titulo ignorado — extract_titulo não rodou hoje "
+    #         "(output em disco já está atualizado)."
+    #     )
+    # else:
+    #     etapa_transform_titulo()
 
 
 def painel_suprimentos() -> None:
@@ -380,6 +420,8 @@ def painel_suprimentos() -> None:
     ok_servico = etapa_extract_servico("01/01/2014")
     ok_contrato = etapa_extract_contrato("01/01/2014")
     ok_adiantamento = etapa_extract_adiantamento("01/01/2014")
+    ok_curva_abc = etapa_extract_curva_abc_apropriacao()
+    ok_avaliacao_fornecedor = etapa_extract_avaliacao_fornecedor()
 
     falhas = []
     if not ok_painel:
@@ -392,6 +434,10 @@ def painel_suprimentos() -> None:
         falhas.append("extract_contrato")
     if not ok_adiantamento:
         falhas.append("extract_adiantamento")
+    if not ok_curva_abc:
+        falhas.append("extract_curva_abc_apropriacao")
+    if not ok_avaliacao_fornecedor:
+        falhas.append("extract_avaliacao_fornecedor")
 
     if falhas:
         _cancelar_transforms(falhas)
@@ -402,6 +448,8 @@ def painel_suprimentos() -> None:
     etapa_transform_servico()
     etapa_transform_contrato()
     etapa_transform_adiantamento()
+    etapa_transform_curva_abc_apropriacao()
+    etapa_transform_avaliacao_fornecedor()
 
 
 def painel_gestao_usuario() -> None:

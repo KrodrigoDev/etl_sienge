@@ -80,15 +80,6 @@ def extrair_painel_compras(
 
         req.fechar_popup_novidade(wdw)
 
-        # ── 3 Selecionar todas as colunas ───────────────────────────────────
-
-        req.scrollar_pagina(driver)
-
-        logger.info("Selecionando todas as colunas do relatório de compras")
-        req.selecionar_todas_colunas(wdw)
-
-        sleep(1)
-
         # ── 4. Preenche data inicial ──────────────────────────────────────────
         logger.info("Preenchendo data inicial: %s", data_inicio)
         req.preencher_campo(
@@ -107,6 +98,17 @@ def extrair_painel_compras(
         )
 
         req.aguardar_carregamento_tabela(driver)
+
+        # ── 3 Selecionar todas as colunas ───────────────────────────────────
+
+        req.scrollar_pagina(driver)
+
+        logger.info("Selecionando todas as colunas do relatório de compras")
+        req.selecionar_todas_colunas(wdw)
+
+        sleep(1)
+
+        req.salvar_screenshot_debug(driver, nome_extracao='painel_compras', prefixo="01_filtros_preenchidos")
 
         req.aguardar_presenca(
             wdw,
@@ -153,6 +155,8 @@ def extrair_painel_compras(
 
 
     finally:
+
+        req.salvar_screenshot_debug(driver, nome_extracao='painel_compras', prefixo="02_etapa_final")
 
         try:
 

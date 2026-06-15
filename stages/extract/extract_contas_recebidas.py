@@ -59,10 +59,16 @@ CONDICOES_SIGLAS = [
     "PU", "PI", "PP",
 ]
 
-AUXILIAR_PATH = (
+AUXILIAR_PATH_SOCIOS = (
         Path(__file__).resolve().parents[2]
-        / "stages" / "extract" / "reference" / "auxiliar_contas_recebidas.xlsx"
+        / "stages" / "extract" / "reference" / "auxiliar_contas_recebidas_socios.xlsx"
 )
+
+AUXILIAR_PATH_PAINEL = (
+        Path(__file__).resolve().parents[2]
+        / "stages" / "extract" / "reference" / "auxiliar_contas_recebidas_painel.xlsx"
+)
+
 BASE_OUTPUT_DIR = (
         Path(__file__).resolve().parents[2]
         / "stages" / "transform" / "input" / "contas_recebidas"
@@ -71,8 +77,8 @@ BASE_OUTPUT_DIR = (
 
 # ── Helpers de pasta ──────────────────────────────────────────────────────────
 
-def pasta_brutos(slug_cc: str) -> Path:
-    p = BASE_OUTPUT_DIR / slug_cc / "dados_brutos"
+def pasta_brutos(slug_cc: str, tipo_path: str = 'socios') -> Path:
+    p = BASE_OUTPUT_DIR / slug_cc / tipo_path
     p.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -103,8 +109,10 @@ def fmt(d: date) -> str:
 
 # ── Leitura do auxiliar ───────────────────────────────────────────────────────
 
-def carregar_centros_ativos() -> list[dict]:
-    df = pd.read_excel(AUXILIAR_PATH, sheet_name="centros_custo")
+def carregar_centros_ativos(tipo_path: str = 'socios') -> list[dict]:
+    path = AUXILIAR_PATH_SOCIOS if tipo_path == 'socios' else AUXILIAR_PATH_PAINEL
+
+    df = pd.read_excel(path, sheet_name="centros_custo")
     df = df[df["ativo"].str.strip().str.lower() == "sim"]
     return df.to_dict(orient="records")
 
@@ -231,7 +239,7 @@ def abrir_relatorio(driver, wdw: WebDriverWait) -> None:
 
 # ── Filtros fixos (executados uma única vez por centro de custo) ──────────────
 
-def preencher_filtros_fixos(driver, wdw: WebDriverWait, centro: dict) -> None:
+def preencher_filtros_fixos(driver, wdw: WebDriverWait, centro: dict, tipo_path: str = 'socios') -> None:
     # Empresa
     selecionar_via_lupa(
         driver, wdw,
@@ -259,43 +267,44 @@ def preencher_filtros_fixos(driver, wdw: WebDriverWait, centro: dict) -> None:
     valor_coluna = "J" if "juros" in str(centro.get("tipo_coluna", "")).lower() else "P"
     Select(wdw.until(EC.element_to_be_clickable((By.NAME, "flColuna")))).select_by_value(valor_coluna)
 
-    # Tipo de lançamento → Contas a receber
-    Select(wdw.until(EC.element_to_be_clickable((By.NAME, "flTipoSelecao")))).select_by_value("CR")
+    if tipo_path == 'socios':
+        # Tipo de lançamento → Contas a receber
+        Select(wdw.until(EC.element_to_be_clickable((By.NAME, "flTipoSelecao")))).select_by_value("CR")
 
-    # Abre parâmetros avançados
-    SeleniumRequester.aguardar_e_clicar(
-        wdw, (By.XPATH, '//img[contains(@name, "toggleFiltro")]')
-    )
-    sleep(0.5)
+        # Abre parâmetros avançados
+        SeleniumRequester.aguardar_e_clicar(
+            wdw, (By.XPATH, '//img[contains(@name, "toggleFiltro")]')
+        )
+        sleep(0.5)
 
-    # Documento → CT
-    selecionar_via_lupa(
-        driver, wdw,
-        locator_lupa=(By.XPATH, '//img[contains(@onclick, "docMultFilterContaRecebidas")]'),
-        campo_pesquisa_name="entity.documentoPK.cdDocumento",
-        codigo="CT",
-        descricao="Documento",
-    )
+        # Documento → CT
+        selecionar_via_lupa(
+            driver, wdw,
+            locator_lupa=(By.XPATH, '//img[contains(@onclick, "docMultFilterContaRecebidas")]'),
+            campo_pesquisa_name="entity.documentoPK.cdDocumento",
+            codigo="CT",
+            descricao="Documento",
+        )
 
-    # Tipos de cliente (3 = Registrado, 6 = Venda Direta)
-    selecionar_via_lupa(
-        driver, wdw,
-        locator_lupa=(By.XPATH, '//img[contains(@onclick, "tipoCliente")]'),
-        campo_pesquisa_name="entity.tipoClientePK.cdTipoCliente",
-        codigo=TIPOS_CLIENTE_IDS,
-        descricao="Clientes",
-        busca_simple=False,
-    )
+        # Tipos de cliente (3 = Registrado, 6 = Venda Direta)
+        selecionar_via_lupa(
+            driver, wdw,
+            locator_lupa=(By.XPATH, '//img[contains(@onclick, "tipoCliente")]'),
+            campo_pesquisa_name="entity.tipoClientePK.cdTipoCliente",
+            codigo=TIPOS_CLIENTE_IDS,
+            descricao="Clientes",
+            busca_simple=False,
+        )
 
-    # Condições de pagamento (21)
-    selecionar_via_lupa(
-        driver, wdw,
-        locator_lupa=(By.XPATH, '//img[contains(@onclick, "tipoCondicao")]'),
-        campo_pesquisa_name="tipoCondicaoPK.cdTipoCondicao",
-        codigo=CONDICOES_SIGLAS,
-        descricao="Condições",
-        busca_simple=False,
-    )
+        # Condições de pagamento (21)
+        selecionar_via_lupa(
+            driver, wdw,
+            locator_lupa=(By.XPATH, '//img[contains(@onclick, "tipoCondicao")]'),
+            campo_pesquisa_name="tipoCondicaoPK.cdTipoCondicao",
+            codigo=CONDICOES_SIGLAS,
+            descricao="Condições",
+            busca_simple=False,
+        )
 
     logger.info("Filtros fixos preenchidos para '%s'", centro["centro_custo"])
 
@@ -343,6 +352,7 @@ def _gerar_e_salvar(
         requester: SeleniumRequester,
         slug_cc: str,
         label: str,  # ex: grand_paladium__obra_202509_sintetico
+        tipo_path: str = 'socios'
 ) -> bool:
     """
     Gera o relatório, verifica se há dados e, caso positivo, aguarda o
@@ -376,7 +386,7 @@ def _gerar_e_salvar(
     arquivo = requester.aguardar_download(extensao=".xlsx")
 
     # 5. Move para o destino final com nomenclatura correta
-    destino = pasta_brutos(slug_cc) / f"{label}.xlsx"
+    destino = pasta_brutos(slug_cc, tipo_path) / f"{label}.xlsx"
     shutil.move(str(arquivo), str(destino))
     logger.info("Salvo → %s", destino.relative_to(BASE_OUTPUT_DIR))
     return True
@@ -387,7 +397,8 @@ def baixar_par(
         wdw: WebDriverWait,
         requester: SeleniumRequester,
         slug_cc: str,
-        periodo_aamm: str,  # ex: "202509"
+        periodo_aamm: str,  # ex: "202509",
+        tipo_path: str = 'socios'
 ) -> None:
     """
     Baixa Sintético e Analítico do período já preenchido.
@@ -396,7 +407,7 @@ def baixar_par(
     """
     label_ana = f"{slug_cc}_serie_historica_ate_{periodo_aamm}_analitico"
 
-    teve_dados = _gerar_e_salvar(driver, wdw, requester, slug_cc, label_ana)
+    teve_dados = _gerar_e_salvar(driver, wdw, requester, slug_cc, label_ana, tipo_path)
     sleep(1)
 
     if not teve_dados:
@@ -411,32 +422,32 @@ def processar_centro(
         wdw: WebDriverWait,
         requester: SeleniumRequester,
         centro: dict,
+        tipo_path: str = 'socios'
 ) -> None:
     nome_cc = str(centro["centro_custo"]).strip()
     slug_cc = nome_cc.lower().replace(" ", "_").replace("-", "")[:40]
 
-
-
     # Garante estrutura de pastas para este centro
-    pasta_brutos(slug_cc)
+    pasta_brutos(slug_cc, tipo_path)
 
     # Filtros fixos: uma única vez
     abrir_relatorio(driver, wdw)
-    preencher_filtros_fixos(driver, wdw, centro)
+    preencher_filtros_fixos(driver, wdw, centro, tipo_path)
 
     fim_ultimo_mes = fim_de_mes(mes_anterior_ao_vigente())
     periodo_aamm = fim_ultimo_mes.strftime("%Y%m")
 
     atualizar_periodo(wdw, date(day=1, month=1, year=2000), fim_ultimo_mes)
 
-    baixar_par(driver, wdw, requester, slug_cc, periodo_aamm)
+    baixar_par(driver, wdw, requester, slug_cc, periodo_aamm, tipo_path)
 
 
 # ── Entrypoint ────────────────────────────────────────────────────────────────
 
 
-def main() -> None:
-    centros = carregar_centros_ativos()
+def main(tipo_path: str = 'socios') -> None:
+
+    centros = carregar_centros_ativos(tipo_path=tipo_path)
     logger.info("%d centros de custo ativos carregados", len(centros))
 
     requester = SeleniumRequester(download_dir=BASE_OUTPUT_DIR / "_temp_downloads")
@@ -455,7 +466,7 @@ def main() -> None:
             wdw = requester.waiter(driver)
             SeleniumRequester.navegacao_inicial(driver, wdw)
 
-            processar_centro(driver, wdw, requester, centro)
+            processar_centro(driver, wdw, requester, centro, tipo_path)
 
             logger.info(
                 "[%s] Finalizado com sucesso",
@@ -481,5 +492,15 @@ def main() -> None:
     logger.info("Concluído. Arquivos em: %s", BASE_OUTPUT_DIR)
 
 
+# criar um if que vai permitir escolher entre a extracao das empresas dos socios e do painel
+# quando for referente ao painel od filtros preenchimentos serão os abaixos
+
+# período de recebimento: 01/01/2000 a 31/12/2090
+# empresa: pegar do auxiliar
+# centro de custo: pegar do auxiliar
+# ordem: Cliente
+
+# Observação: no lagoon clube não filtrar pelo tipo de cliente
+
 if __name__ == "__main__":
-    main()
+    main(tipo_path='socios')

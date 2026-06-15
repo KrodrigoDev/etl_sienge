@@ -84,6 +84,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
 
     # Duração em dias (data_de_termino - data_de_inicio)
     df['duracao_dias'] = (df['data_de_termino'] - df['data_de_inicio']).dt.days
+    df['dias_cadastro_ate_alteracao'] = (df['data_de_alteracao'] - df['data_do_cadastro']).dt.days
 
     # Limpeza do campo observação (remove \r\n)
     df['observacao'] = df['observacao'].astype(str).str.replace(r'\r\n', ' ', regex=True).str.strip()
@@ -236,6 +237,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
 
         # métricas derivadas
         'duracao_dias',
+        'dias_cadastro_ate_alteracao',
 
         # texto livre
         'observacao',

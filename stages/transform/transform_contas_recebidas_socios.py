@@ -52,12 +52,12 @@ logger = logging.getLogger(__name__)
 
 AUXILIAR_PATH = (
         Path(__file__).resolve().parents[2]
-        / "stages" / "extract" / "reference" / "auxiliar_contas_recebidas.xlsx"
+        / "stages" / "extract" / "reference" / "auxiliar_contas_recebidas_socios.xlsx"
 )
 
 BASE_INPUT_DIR = (
         Path(__file__).resolve().parents[2]
-        / "stages" / "transform" / "input" / "contas_recebidas"
+        / "stages" / "transform" / "input"
 )
 
 BASE_OUTPUT_DIR = (
@@ -406,17 +406,23 @@ def carregar_extrato(nome_empreendimento: str) -> set[str]:
     if not EXTRATO_PATH.exists():
         logger.warning("Extrato não encontrado → novo_cliente sempre 'N'")
         return set()
-    df = pd.read_excel(EXTRATO_PATH, sheet_name="UNIDADES", header=1)
+    df = pd.read_excel(EXTRATO_PATH, sheet_name="UNIDADES")
+
+    # tratar isso  da maneira que vem para não precisar apagar o dado de original (()
     df.columns = ["cnpj", "empreendimento", "contrato",
                   "nome_mutuario", "cpf", "dt_assinatura", "dt_cri"]
+
     df["dt_cri"] = pd.to_datetime(df["dt_cri"], errors="coerce")
     df["nome_up"] = df["nome_mutuario"].astype(str).str.strip().str.upper()
     chave = re.escape(nome_empreendimento.upper()[:15])
+
+
     df = df[df["empreendimento"].astype(str).str.upper().str.contains(chave, regex=True)]
     ini, fim, label = _mes_anterior()
     mask = (df["dt_cri"].dt.date >= ini) & (df["dt_cri"].dt.date <= fim)
     novos = set(df.loc[mask, "nome_up"].tolist())
     logger.info("Extrato [%s]: %d novo(s) em %s", nome_empreendimento, len(novos), label)
+
     return novos
 
 
@@ -445,7 +451,10 @@ def ler_vgv_clientes() -> pd.DataFrame:
 
 
 def ler_contas_a_receber() -> pd.DataFrame:
-    files = Path(r'C:\Users\kaua.rodrigo\Documents\etl_sienge\stages\transform\input\contas_a_receber').glob("*.xlsx*")
+    files = (BASE_INPUT_DIR / "contas_a_receber").glob("*.xlsx*")
+
+
+
     arquivos = []
 
     for file in files:
@@ -506,7 +515,6 @@ def ler_contas_a_receber() -> pd.DataFrame:
     dados["titulo"] = pd.to_numeric(dados["titulo"], errors="coerce")
     df_vgv["titulo"] = pd.to_numeric(df_vgv["titulo"], errors="coerce")
 
-
     dados = dados.merge(df_vgv, how="outer", left_on="titulo", right_on="titulo")
 
     dados["cliente"] = dados["cliente_x"].combine_first(dados["cliente_y"])
@@ -531,7 +539,7 @@ def ler_analitico(caminho: Path, novos: set[str], centro: dict) -> pd.DataFrame:
     dados = dados[~dados["cliente"].astype(str).apply(_eh_rodape)]
 
     for col in colunas_num:
-        if col == "amortizacao":
+        if col in ["amortizacao", "vl_baixa"]:
             dados[col] = (dados[col].astype(str)
                           .str.replace(" P", "", regex=False).str.strip())
             mask = dados[col].str.contains(",", na=False)
@@ -829,7 +837,8 @@ def _salvar_acompanhamento(
     # ── 1. Pivot ──────────────────────────────────────────────────────────────
 
     df_sin_fechamento = df_sin_fechamento.rename(columns={
-        "amortizacao": "bruto"
+        "liquido": "bruto",
+        "valor_liquido_repasse": "liquido"
     })
 
     df_pivot, col_map = _construir_pivot_mensal(df_sin_fechamento)
@@ -840,7 +849,7 @@ def _salvar_acompanhamento(
         return
 
     # ── 2. Totais históricos ──────────────────────────────────────────────────
-    cols_liq = [c for c in df_pivot.columns if c.endswith("_liquido")]
+    cols_liq = [c for c in df_pivot.columns if c.endswith("_bruto")]
     df_pivot["valor_liquido_total"] = df_pivot[cols_liq].sum(axis=1)
     df_pivot["pct_repasse"] = pct
     df_pivot["valor_liquido_repasse"] = (df_pivot["valor_liquido_total"] * pct).round(2)
@@ -868,8 +877,9 @@ def _salvar_acompanhamento(
 
     df_pivot['valor_a_repassar'] = (df_pivot["total_por_cliente"] - df_pivot['valor_liquido_repasse'])
 
+
     df_pivot = df_pivot.rename(columns={
-        "amortizacao": "bruto"
+        "liquido": "bruto",
     })
 
     # ── 5. Layout de colunas ──────────────────────────────────────────────────
@@ -1012,6 +1022,7 @@ def _adicionar_fechamento_sintetico(wb: Workbook, df: pd.DataFrame,
     cabecalhos, colunas_df, colunas_valor = _colunas_excel_sintetico(centro)
 
     cols_remover = {"inadimplente", "a_vencer", "carteira_total", "vgv_vendido", "contrato_total", "check"}
+
     colunas_df = [c for c in colunas_df if c not in cols_remover]
     colunas_valor = [c for c in colunas_valor if c not in cols_remover]
     cabecalhos = [h for h, c in zip(cabecalhos, _colunas_excel_sintetico(centro)[1])
@@ -1184,22 +1195,22 @@ def _obter_competencia():
         "competencia": competencia_dt.strftime("%m.%Y"),
     }
 
-def transformar_centro(centro: dict, novos: set[str], contas_a_receber, comp: dict) -> dict:
 
+def transformar_centro(centro: dict, novos: set[str], contas_a_receber, comp: dict) -> dict:
     nome_cc = str(centro["centro_custo"]).strip()
     slug_cc = _slug(nome_cc)
     nome_pasta_cc = slug_cc.replace("_", " ").title()
     pct = float(centro.get("pct_repasse") or 0)
     _, _, colunas_num = _layout(centro)
 
-    dir_brutos = BASE_INPUT_DIR / slug_cc / "dados_brutos"
+    dir_brutos = BASE_INPUT_DIR / "contas_recebidas" / slug_cc / "socios"
     dir_consol = BASE_OUTPUT_DIR / nome_pasta_cc / comp["ano"] / comp["mes_ref"]
 
     dir_consol.mkdir(parents=True, exist_ok=True)
 
-    destino_ana = dir_consol / f"Analítico - {comp['competencia']}.xlsx"
-    destino_sin = dir_consol / f"Sintético - {comp['competencia']}.xlsx"
-    destino_acom = dir_consol / f"Acompanhamento - {comp['competencia']}.xlsx"
+    destino_ana = dir_consol / f"Analítico - {slug_cc} - {comp['competencia']}.xlsx"
+    destino_sin = dir_consol / f"Sintético - {slug_cc} - {comp['competencia']}.xlsx"
+    destino_acom = dir_consol / f"Acompanhamento - {slug_cc} - {comp['competencia']}.xlsx"
 
     resultado = {
         "nome_cc": nome_cc,
@@ -1226,9 +1237,13 @@ def transformar_centro(centro: dict, novos: set[str], contas_a_receber, comp: di
     if not frames_ana:
         return resultado
 
+    base_calculo = 'vl_baixa' if centro.get('tipo_coluna', '') == 'Padrão' else 'liquido'
+
     df_ana = pd.concat(frames_ana, ignore_index=True)
     df_ana["pct_repasse"] = pct
-    df_ana["valor_liquido_repasse"] = (df_ana["liquido"] * pct).round(2)
+    df_ana["valor_liquido_repasse"] = (df_ana[base_calculo] * pct).round(2)
+
+
     df_ana = df_ana.sort_values(["cliente", "dt_baixa"]).reset_index(drop=True)
 
     # ── 2. Deriva o sintético temporal (base do fechamento e acompanhamento) ──
@@ -1241,12 +1256,12 @@ def transformar_centro(centro: dict, novos: set[str], contas_a_receber, comp: di
         .agg(cols_agg)
     )
 
-    if "liquido" not in df_sin_fechamento.columns and "vl_baixa" in df_sin_fechamento.columns:
-        df_sin_fechamento["liquido"] = df_sin_fechamento["vl_baixa"]
+    # if "liquido" not in df_sin_fechamento.columns and "vl_baixa" in df_sin_fechamento.columns:
+    #     df_sin_fechamento["liquido"] = df_sin_fechamento["vl_baixa"]
 
     df_sin_fechamento["pct_repasse"] = pct
     df_sin_fechamento["valor_liquido_repasse"] = (
-            df_sin_fechamento["liquido"] * pct
+            df_sin_fechamento[base_calculo] * pct
     ).round(2)
     df_sin_fechamento = df_sin_fechamento.sort_values("cliente").reset_index(drop=True)
 
@@ -1394,7 +1409,9 @@ def main() -> None:
     resultados = []
     contas_a_receber = ler_contas_a_receber()
 
+
     comp = _obter_competencia()
+    print(comp)
     for centro in centros:
         nome_cc = str(centro["centro_custo"]).strip()
         try:

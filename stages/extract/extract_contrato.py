@@ -58,7 +58,7 @@ def extrair_contratos(
     """
 
     if data_inicio is None:
-        data_inicio = f"01/01/2024"
+        data_inicio = f"01/01/2000"
 
     req = SeleniumRequester()
     req.ensure_login()
@@ -83,13 +83,6 @@ def extrair_contratos(
 
         # ── 3 Selecionar todas as colunas ───────────────────────────────────
 
-        req.scrollar_pagina(driver)
-
-        logger.info("Selecionando todas as colunas do relatório de contratos")
-        req.selecionar_todas_colunas(wdw, pagina='contratos')
-
-        sleep(1)
-
         # ── 4. Preenche data inicial ──────────────────────────────────────────
         logger.info("Preenchendo data inicial: %s", data_inicio)
         req.preencher_campo(
@@ -108,6 +101,14 @@ def extrair_contratos(
         )
 
         req.aguardar_carregamento_tabela(driver)
+
+        req.scrollar_pagina(driver)
+
+        logger.info("Selecionando todas as colunas do relatório de contratos")
+        req.selecionar_todas_colunas(wdw, pagina='contratos')
+
+        sleep(1)
+
 
         req.aguardar_presenca(
             wdw,
@@ -129,7 +130,7 @@ def extrair_contratos(
         # ainda não renderizado em headless
         opcao_todas = wdw.until(
             EC.visibility_of_element_located(
-                (By.XPATH, '//li[@role="option" and contains(.,"Todos")]')
+                (By.XPATH, '//li[@role="option" and contains(.,"5000")]')
             )
         )
         driver.execute_script("arguments[0].click();", opcao_todas)
@@ -137,47 +138,67 @@ def extrair_contratos(
         req.aguardar_carregamento_tabela(driver)
         sleep(3)
 
-        req.aguardar_carregamento_tabela(driver)
+        pagina = 1
 
-        # ── 7. Exporta CSV ────────────────────────────────────────────────────
-        logger.info("Exportando CSV...")
-        req.exportar_csv_modal(wdw)
+        while True:
+            # ── 8. Exporta CSV ────────────────────────────────────────────────────
+            logger.info("Exportando CSV do estoque...")
+            req.exportar_csv_modal(wdw)
 
-        # ── 8. Aguarda download ───────────────────────────────────────────────
-        arquivo_baixado = req.aguardar_download(extensao=".csv")
+            # ── 9. Aguarda download ───────────────────────────────────────────────
+            arquivo_baixado = req.aguardar_download(extensao=".csv")
 
-        # ── 9. Move para pasta de destino ─────────────────────────────────────
-        nome_final = f"contratos_{date.today().year}.csv"
-        arquivo_final = destino / nome_final
-        shutil.move(str(arquivo_baixado), str(arquivo_final))
-        logger.info("Arquivo salvo em: %s", arquivo_final)
+            # ── 10. Move para pasta de destino ────────────────────────────────────
+            nome_final = f"contratos_{pagina}_{date.today().year}.csv"
+            arquivo_final = destino / nome_final
+            shutil.move(str(arquivo_baixado), str(arquivo_final))
+            logger.info("Arquivo salvo em: %s", arquivo_final)
 
-        return arquivo_final
+            # ── Verifica se existe próxima página ──────────────────────────
+            try:
+                btn_proxima = driver.find_element(
+                    By.XPATH,
+                    '//button[@aria-label="Ir para a próxima página"]',
+                )
+            except Exception:
+                logger.info("Botão de próxima página não encontrado. Encerrando paginação.")
+                break
+
+            if btn_proxima.get_attribute("disabled") is not None:
+                logger.info("Última página atingida após página %d. Encerrando.", pagina)
+                break
+
+            # ── Vai para a próxima página ──────────────────────────────────
+            logger.info("Avançando para a página %d...", pagina + 1)
+            driver.execute_script("arguments[0].click();", btn_proxima)
+            pagina += 1
+            req.aguardar_carregamento_tabela(driver)
+            sleep(3)
 
 
     finally:
 
-        try:
+        # try:
 
-            driver.quit()
+        driver.quit()
 
-        except Exception:
+        # except Exception:
+        #
+        #     pass
 
-            pass
-
-        try:
-
-            subprocess.run(
-
-                ["taskkill", "/F", "/IM", "msedge.exe", "/T"],
-
-                capture_output=True,
-
-            )
-
-        except Exception:
-
-            pass
+        # try:
+        #
+        #     subprocess.run(
+        #
+        #         ["taskkill", "/F", "/IM", "msedge.exe", "/T"],
+        #
+        #         capture_output=True,
+        #
+        #     )
+        #
+        # except Exception:
+        #
+        #     pass
 
         logger.info("Driver encerrado.")
 
@@ -187,5 +208,4 @@ if __name__ == "__main__":
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
-    caminho = extrair_contratos()
-    print(f"Extração concluída: {caminho}")
+    extrair_contratos()

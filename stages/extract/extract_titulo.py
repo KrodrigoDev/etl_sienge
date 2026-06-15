@@ -58,6 +58,7 @@ def extrair_titulo(
         driver.get(URL_TITULO)
         sleep(2)
 
+        req.salvar_screenshot_debug(driver,  nome_extracao='titulo')
         req.fechar_popup_novidade(wdw)
 
         # ── 3. Entra no iframe ───────────────────────────────────────────────

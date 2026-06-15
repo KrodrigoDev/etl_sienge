@@ -41,7 +41,7 @@ CONDICOES_SIGLAS = [
 
 AUXILIAR_PATH = (
         Path(__file__).resolve().parents[2]
-        / "stages" / "extract" / "reference" / "auxiliar_contas_recebidas.xlsx"
+        / "stages" / "extract" / "reference" / "auxiliar_contas_recebidas_socios.xlsx"
 )
 BASE_OUTPUT_DIR = (
         Path(__file__).resolve().parents[2]
@@ -319,6 +319,15 @@ def main() -> None:
 
     logger.info("Concluído. Arquivos em: %s", BASE_OUTPUT_DIR)
 
+
+# criar um if que vai permitir escolher entre a extracao das empresas dos socios e do painel
+# quando for referente ao painel od filtros preenchimentos serão os abaixos
+
+# período de recebimento: 01/01/2000 a 31/12/2090
+# empresa: pegar do auxiliar
+# centro de custo: pegar do auxiliar
+# ordem: Cliente
+# Processar lançamentos referentes a: Contas a receber
 
 if __name__ == "__main__":
     main()

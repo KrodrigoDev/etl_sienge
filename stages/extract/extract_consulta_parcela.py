@@ -1,4 +1,6 @@
 """
+Observação: A consulta foi migrada para o consumo direto da api no dia 03/06/2026
+
 stages/extract/extract_painel_compras.py
 -----------------------------------------
 Extrai o relatório de Painel de Compras do SIENGE e salva como CSV.
@@ -23,6 +25,8 @@ from time import sleep
 
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.action_chains import ActionChains
 
 from src.drivers.selenium_requester import BASE_URL, SeleniumRequester
 
@@ -35,12 +39,80 @@ URL_PAINEL = (
 )
 
 
+def _preencher_campo_data(driver, wdw, css_selector: str, valor: str) -> None:
+    """
+    Preenche campo de data com máscara de forma confiável em headless.
+
+    Problema resolvido
+    ------------------
+    Quando executado via Agendador de Tarefas (headless, sem sessão interativa),
+    campos de data com máscara JS (Angular/React) frequentemente:
+      - Já possuem um valor padrão → send_keys concatena ao invés de substituir
+      - Não disparam os eventos change/blur necessários para o framework processar
+      - Comportam-se diferente sem foco visual real
+
+    Estratégia
+    ----------
+    1. Aguarda o campo estar clicável
+    2. Move o mouse e clica para focar (simula interação real)
+    3. Seleciona tudo (CTRL+A) e deleta — garante campo limpo
+    4. Envia apenas os dígitos um a um com delay entre teclas
+       (a máscara insere as barras automaticamente)
+    5. Confirma com TAB para disparar blur/change do framework
+    6. Loga o valor real obtido para diagnóstico
+
+    Parameters
+    ----------
+    driver       : WebDriver já iniciado
+    wdw          : WebDriverWait configurado
+    css_selector : seletor CSS do input de data
+    valor        : data no formato dd/mm/yyyy
+    """
+    campo = wdw.until(
+        EC.element_to_be_clickable((By.CSS_SELECTOR, css_selector))
+    )
+
+    # Foca via ActionChains (mais próximo de interação humana real)
+    ActionChains(driver).move_to_element(campo).click().perform()
+    sleep(0.5)
+
+    # Limpa qualquer valor pré-existente
+    campo.send_keys(Keys.CONTROL + "a")
+    campo.send_keys(Keys.DELETE)
+    sleep(0.3)
+
+    # Envia apenas dígitos — a máscara cuida das barras
+    # Ex: "31/12/2026" → "31122026"
+    apenas_digitos = valor.replace("/", "")
+    for digito in apenas_digitos:
+        campo.send_keys(digito)
+        sleep(0.05)  # delay entre teclas auxilia campos com máscara JS
+
+    # TAB dispara blur → framework (Angular/React) processa o valor
+    campo.send_keys(Keys.TAB)
+    sleep(1.5)
+
+    # Diagnóstico: loga o valor que ficou no campo
+    valor_obtido = campo.get_attribute("value")
+    logger.debug(
+        "Campo '%s': esperado='%s', obtido='%s'",
+        css_selector, valor, valor_obtido,
+    )
+
+    if valor_obtido != valor:
+        logger.warning(
+            "Campo '%s' pode não ter sido preenchido corretamente. "
+            "Esperado: '%s', Obtido: '%s'",
+            css_selector, valor, valor_obtido,
+        )
+
+
 def extrair_consulta_parcela(
         data_inicio: str | None = None,
         destino: Path | None = None,
 ):
     if data_inicio is None:
-        data_inicio = f"01/01/2026"
+        data_inicio = f"01/01/2024"
 
     req = SeleniumRequester()
     req.ensure_login()
@@ -64,21 +136,22 @@ def extrair_consulta_parcela(
 
         # ── 3. Preenche data inicial ──────────────────────────────────────────
         logger.info("Preenchendo data inicial: %s", data_inicio)
-        req.preencher_campo(
-            wdw,
-            (By.CSS_SELECTOR, 'input[name="dataVencimentoInicial"]'),
+        _preencher_campo_data(
+            driver, wdw,
+            'input[name="dataVencimentoInicial"]',
             data_inicio,
         )
-        sleep(3)
 
-        data_final = f'31/12/{date.today().year}'
+        data_final = f"31/12/2040"
         logger.info("Preenchendo data final: %s", data_final)
-        req.preencher_campo(
-            wdw,
-            (By.CSS_SELECTOR, 'input[name="dataVencimentoFinal"]'),
+        _preencher_campo_data(
+            driver, wdw,
+            'input[name="dataVencimentoFinal"]',
             data_final,
         )
-        sleep(3)
+
+        # Debug: confirma os valores preenchidos antes de consultar
+        req.salvar_screenshot_debug(driver, nome_extracao='consulta_parcela', prefixo="02_datas_preenchidas")
 
         # ── 5. Consultar ──────────────────────────────────────────────────────
         logger.info("Consultando...")
@@ -92,7 +165,7 @@ def extrair_consulta_parcela(
 
         # ── 3. Selecionar todas as colunas ────────────────────────────────────
         req.scrollar_pagina(driver)
-        logger.info("Selecionando todas as colunas do relatório de serviços")
+        logger.info("Selecionando todas as colunas do relatório consulta de parcelas")
         req.selecionar_todas_colunas(wdw, pagina='serviços')
         sleep(2)
 
@@ -165,7 +238,7 @@ def extrair_consulta_parcela(
                 )
 
             # ── Move para pasta de destino ─────────────────────────────────
-            nome_final = f"consulta_parcela_{pagina}_{date.today().year}.csv"
+            nome_final = f"consulta_parcela_{pagina}.csv"
             arquivo_final = destino / nome_final
             shutil.move(str(arquivo_baixado), str(arquivo_final))
             logger.info("Arquivo salvo em: %s", arquivo_final)
@@ -193,6 +266,9 @@ def extrair_consulta_parcela(
 
     finally:
 
+        req.salvar_screenshot_debug(driver, nome_extracao='consulta_parcela', prefixo="estado_final")
+
+        sleep(0.5)
         driver.quit()
         logger.info("Driver encerrado.")
 
