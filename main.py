@@ -410,6 +410,18 @@ def painel_consultas() -> None:
     #     etapa_transform_titulo()
 
 
+def etapa_transform_painel_suprimentos() -> None:
+    """
+    Roda todos  os módulos de de transforms do painel de suprimentos .
+    """
+    etapa_transform_painel_compras()
+    etapa_transform_estoque()
+    etapa_transform_servico()
+    etapa_transform_contrato()
+    etapa_transform_adiantamento()
+    etapa_transform_curva_abc_apropriacao()
+    etapa_transform_avaliacao_fornecedor()
+
 def painel_suprimentos() -> None:
     """
     Extrai todos os módulos de suprimentos.
@@ -443,13 +455,7 @@ def painel_suprimentos() -> None:
         _cancelar_transforms(falhas)
         return
 
-    etapa_transform_painel_compras()
-    etapa_transform_estoque()
-    etapa_transform_servico()
-    etapa_transform_contrato()
-    etapa_transform_adiantamento()
-    etapa_transform_curva_abc_apropriacao()
-    etapa_transform_avaliacao_fornecedor()
+    etapa_transform_painel_suprimentos()
 
 
 def painel_gestao_usuario() -> None:
@@ -504,6 +510,7 @@ _ETAPAS_VALIDAS = [
     "transform_titulo",
     "painel_consultas",
     "painel_suprimentos",
+    "etapa_transform_painel_suprimentos",
     "painel_gestao_usuario"
 ]
 
@@ -599,6 +606,9 @@ def main() -> None:
     # ── Paineis ───────────────────────────────────────────────────────────────
     elif args.etapa == "painel_consultas":
         painel_consultas()
+
+    elif args.etapa == "etapa_transform_painel_suprimentos":
+        etapa_transform_painel_suprimentos()
 
     elif args.etapa == "painel_suprimentos":
         painel_suprimentos()

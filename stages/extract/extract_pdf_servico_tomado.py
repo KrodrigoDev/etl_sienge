@@ -23,7 +23,6 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select, WebDriverWait
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.common.exceptions import TimeoutException, InvalidSessionIdException, WebDriverException
-from bs4 import BeautifulSoup
 
 from src.drivers.selenium_requester import SeleniumRequester
 
@@ -38,7 +37,7 @@ pasta_origem = Path(__file__).resolve().parents[2]
 
 dia_extracao = datetime.now().strftime("%d.%m.%Y")
 
-INPUT_DIR = pasta_origem / 'stages' / 'transform' / 'input' / 'servico_tomado' / "19.06.2026"
+INPUT_DIR = pasta_origem / 'stages' / 'transform' / 'input' / 'servico_tomado' / "12.06.2026"
 INPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -248,56 +247,6 @@ def garantir_sem_backdrop(driver, wdw, timeout: int = 10) -> bool:
         return True
 
 
-def extrair_empresas(driver, wdw, req) -> list[dict]:
-    """Retorna lista de empresas disponíveis na tabela."""
-
-    mostrar_itens_empresa(wdw)
-
-    req.aguardar_presenca(wdw, (By.ID, "DataTables_Table_0"))
-
-    wdw.until(
-        lambda d: len(
-            d.find_elements(
-                By.XPATH,
-                '//table[@id="DataTables_Table_0"]/tbody/tr'
-            )
-        ) > 1
-    )
-
-    pausa_humana(1.0, 2.0)
-
-    linhas = driver.find_elements(
-        By.XPATH,
-        '//table[@id="DataTables_Table_0"]/tbody/tr'
-    )
-
-    logger.info(f'Linhas encontradas: {len(linhas)}')
-    empresas = []
-
-    for i, linha in enumerate(linhas):
-        try:
-            colunas = linha.find_elements(By.TAG_NAME, 'td')
-            if len(colunas) < 5:
-                continue
-
-            empresa = {
-                'indice': i,
-                'cnpj': colunas[0].text.strip(),
-                'razao_social': colunas[1].text.strip(),
-                'inscricao_municipal': colunas[2].text.strip(),
-                'municipio': colunas[3].text.strip(),
-            }
-            empresas.append(empresa)
-
-        except Exception as e:
-            logger.warning(f'Erro na linha {i}: {e}')
-
-    logger.info(f'{len(empresas)} empresas encontradas')
-    for emp in empresas:
-        logger.info(f"  [{emp['indice']}] {emp['cnpj']} — {emp['razao_social']}")
-
-    return empresas
-
 
 def selecionar_empresa(driver, wdw, cnpj: str) -> bool:
     """Clica no botão 'Selecionar Empresa' para o CNPJ informado."""
@@ -339,6 +288,21 @@ def preencher_filtro_periodo(driver, competencia: str) -> None:
     scroll_humano(driver, campo_competencia)
     campo_competencia.clear()
     digitar_humanamente(campo_competencia, competencia)
+
+    pausa_humana(0.5, 1.0)
+
+
+def preencher_credor_desejado(driver, cnpj_credor: str) -> None:
+    """Expande o pesquisa avançada e filtra pelo cnpj do credor desejado."""
+
+    pesquisa_avancada = driver.find_element(By.ID, 'secaoPesquisaAvancada')
+    scroll_humano(driver, pesquisa_avancada)
+
+    pesquisa_avancada.click()
+
+    pausa_humana(0.5, 1.0)
+    campo_cnpj = driver.find_element(By.ID, 'cnpjCpf')
+    digitar_humanamente(campo_cnpj, cnpj_credor)
 
     pausa_humana(0.5, 1.0)
 
@@ -385,25 +349,108 @@ def ajustar_paginacao(driver, wdw, tamanho: str = "50") -> None:
     pausa_humana(1.5, 3.0)
 
 
-def extrair_todas_paginas(driver, wdw) -> list[dict]:
+def baixar_pdfs_pagina(driver, wdw, path_cnpj: Path, pagina: int) -> int:
     """
-    Extrai notas de todas as páginas disponíveis,
-    clicando em 'Próximo' até ele desaparecer ou ficar desabilitado.
+    Para cada linha visível na tabela, clica no botão 'Download PDF'
+    (title='Download PDF') quando disponível.
+
+    Aguarda o arquivo aparecer na pasta path_cnpj antes de seguir para o próximo.
+    Retorna a quantidade de PDFs baixados na página.
     """
-    todas_notas = []
+    XPATH_LINHAS = '//table[contains(@class,"table")]//tbody/tr[contains(@ng-repeat,"nota")]'
+    XPATH_BTN_PDF = './/button[@title="Download PDF"]'
+
+    linhas = driver.find_elements(By.XPATH, XPATH_LINHAS)
+    logger.info(f"  {len(linhas)} nota(s) visíveis na página {pagina}.")
+
+    baixados = 0
+
+    for i, linha in enumerate(linhas):
+        try:
+            botoes_pdf = linha.find_elements(By.XPATH, XPATH_BTN_PDF)
+
+            if not botoes_pdf:
+                logger.debug(f"  Linha {i+1}: sem botão PDF — pulando.")
+                continue
+
+            btn = botoes_pdf[0]
+
+            # Registra arquivos existentes antes do clique para detectar o novo
+            arquivos_antes = set(path_cnpj.glob("*.pdf"))
+
+            scroll_humano(driver, btn)
+            pausa_humana(0.3, 0.8)
+            driver.execute_script("arguments[0].click();", btn)
+            logger.info(f"  Linha {i+1}: botão PDF clicado.")
+
+            # Aguarda novo arquivo aparecer na pasta (timeout de 30s)
+            novo_arquivo = _aguardar_novo_pdf(path_cnpj, arquivos_antes, timeout=25)
+
+            if novo_arquivo:
+                logger.info(f"  PDF salvo: {novo_arquivo.name}")
+                baixados += 1
+            else:
+                logger.warning(f"  Linha {i+1}: timeout aguardando PDF — seguindo.")
+
+
+            pausa_humana(0.5, 1.5)
+
+        except Exception as e:
+            logger.warning(f"  Erro ao baixar PDF da linha {i+1}: {e}")
+
+    return baixados
+
+
+def _aguardar_novo_pdf(pasta: Path, arquivos_antes: set, timeout: int = 30) -> Path | None:
+    """
+    Fica em polling até um novo arquivo .pdf (não temporário) aparecer em `pasta`.
+    Retorna o Path do novo arquivo ou None se estourar o timeout.
+    """
+    deadline = __import__('time').time() + timeout
+    while __import__('time').time() < deadline:
+        arquivos_agora = set(pasta.glob("*.pdf"))
+        # Ignora arquivos .crdownload / .tmp (download incompleto do Chrome)
+        novos = arquivos_agora - arquivos_antes
+        completos = [f for f in novos if not f.suffix in ('.crdownload', '.tmp')]
+        if completos:
+            return completos[0]
+        sleep(0.5)
+    return None
+
+def configurar_download_dir(driver, pasta: Path) -> None:
+    """
+    Altera o diretório de download do Edge/Chrome em tempo de execução
+    via Chrome DevTools Protocol (CDP), sem precisar reiniciar o driver.
+    """
+    pasta.mkdir(parents=True, exist_ok=True)
+    driver.execute_cdp_cmd(
+        "Browser.setDownloadBehavior",
+        {
+            "behavior": "allow",
+            "downloadPath": str(pasta.resolve()),
+        }
+    )
+    logger.info(f"Download dir configurado: {pasta.resolve()}")
+
+
+def extrair_todas_paginas(driver, wdw, path_cnpj: Path) -> int:
+    """
+    Percorre todas as páginas de resultados e, em cada uma,
+    clica no botão 'Download PDF' de cada nota disponível,
+    salvando os arquivos em path_cnpj.
+
+    Retorna o total de PDFs baixados.
+    """
+    total_baixados = 0
     pagina = 1
 
     while True:
-        logger.info(f"  Extraindo página {pagina}...")
+        logger.info(f"  Processando página {pagina} — baixando PDFs...")
 
-        # extrai página atual
-        notas_pagina = extrair_notas_tabela(driver)
-        todas_notas.extend(notas_pagina)
+        baixados_pagina = baixar_pdfs_pagina(driver, wdw, path_cnpj, pagina)
+        total_baixados += baixados_pagina
 
-        logger.info(f"  → {len(notas_pagina)} notas na página {pagina} | total acumulado: {len(todas_notas)}")
-
-        # simula leitura da página
-        # pausa_humana(1.5, 3.5) Sem pausas para realizar extração
+        logger.info(f"  → {baixados_pagina} PDF(s) baixado(s) na página {pagina} | total: {total_baixados}")
 
         # ── verifica botão Próximo ────────────────────────────────────
         botoes_proximo = driver.find_elements(
@@ -417,11 +464,10 @@ def extrair_todas_paginas(driver, wdw) -> list[dict]:
 
         botao_proximo = botoes_proximo[0]
 
-        # checa se está desabilitado (atributo disabled ou classe disabled no pai li)
         desabilitado = (
-                botao_proximo.get_attribute("disabled") is not None
-                or not botao_proximo.is_enabled()
-                or "disabled" in (botao_proximo.find_element(By.XPATH, "..").get_attribute("class") or "")
+            botao_proximo.get_attribute("disabled") is not None
+            or not botao_proximo.is_enabled()
+            or "disabled" in (botao_proximo.find_element(By.XPATH, "..").get_attribute("class") or "")
         )
 
         if desabilitado:
@@ -433,7 +479,6 @@ def extrair_todas_paginas(driver, wdw) -> list[dict]:
         pausa_humana(0.5, 1.2)
         mover_mouse_e_clicar(driver, botao_proximo)
 
-        # aguarda nova página carregar (espera as linhas mudarem)
         pagina += 1
         pausa_humana(0.5, 1.5)
 
@@ -447,53 +492,46 @@ def extrair_todas_paginas(driver, wdw) -> list[dict]:
             logger.warning("  Timeout aguardando próxima página — encerrando paginação.")
             break
 
-    logger.info(f"  Paginação concluída: {pagina} página(s), {len(todas_notas)} notas no total.")
-    return todas_notas
+    logger.info(f"  Paginação concluída: {pagina} página(s), {total_baixados} PDF(s) baixado(s) no total.")
+    return total_baixados
 
 
 def extrair_notas_tabela(driver) -> list[dict]:
     """
-    Captura o HTML da tabela de uma vez via JS (imune a StaleElement)
-    e parseia com BeautifulSoup.
+    Extrai todas as linhas visíveis da tabela de NFS-e.
+    Retorna lista de dicts com os campos de cada nota.
     """
-    # Captura o HTML estático da tabela inteira em um único roundtrip
-    html_tabela = driver.execute_script("""
-        var tabela = document.querySelector('table.table tbody');
-        return tabela ? tabela.innerHTML : '';
-    """)
-
-    if not html_tabela:
-        logger.warning("Tabela não encontrada via JS.")
-        return []
-
-    soup = BeautifulSoup(html_tabela, 'html.parser')
-    linhas = soup.select('tr[ng-repeat*="nota"]')
+    linhas = driver.find_elements(
+        By.XPATH,
+        '//table[contains(@class,"table")]//tbody/tr[contains(@ng-repeat,"nota")]'
+    )
 
     logger.info(f"Notas encontradas na página: {len(linhas)}")
     notas = []
 
     for i, linha in enumerate(linhas):
         try:
-            colunas = linha.find_all('td')
+            colunas = linha.find_elements(By.TAG_NAME, 'td')
 
-            def get_col(idx: int) -> str:
-                if idx >= len(colunas):
-                    return ''
-                return colunas[idx].get_text(strip=True)
+            # índices conforme o HTML analisado:
+            # 0=Competência, 1=NFS, 4=Controle, 5=Emissão,
+            # 7=CNPJ/CPF, 8=Prestador, 9=Atividade, 11=Valor, 12=Situação, 13=Declaração
 
             nota = {
-                'competencia': get_col(0),
-                'nfs':         get_col(1),
-                'emissao':     get_col(5),
-                'cnpj_cpf':    get_col(7),
-                'prestador':   get_col(8),
-                'atividade':   get_col(9),
-                'valor':       get_col(11),
-                'situacao':    get_col(12),
-                'declaracao':  get_col(13),
+                'competencia': colunas[0].text.strip() if len(colunas) > 0 else '',
+                'nfs': colunas[1].text.strip() if len(colunas) > 1 else '',
+                'emissao': colunas[5].text.strip() if len(colunas) > 5 else '',
+                'cnpj_cpf': colunas[7].text.strip() if len(colunas) > 7 else '',
+                'prestador': colunas[8].text.strip() if len(colunas) > 8 else '',
+                'atividade': colunas[9].text.strip() if len(colunas) > 9 else '',
+                'valor': colunas[11].text.strip() if len(colunas) > 11 else '',
+                'situacao': colunas[12].text.strip() if len(colunas) > 12 else '',
+                'declaracao': colunas[13].text.strip() if len(colunas) > 13 else '',
             }
+
             notas.append(nota)
 
+            # simula "leitura" ocasional da linha
             if random.random() < 0.15:
                 pausa_humana(0.3, 1.0)
 
@@ -530,7 +568,10 @@ def remover_aviso(driver, wdw, timeout_aviso: int = 5) -> bool:
         return False
 
 
-def processar_empresa(driver, wdw, req, cnpj: str, competencia: str, novo_cnpj: bool = True) -> list[dict]:
+def processar_empresa(driver, wdw, req,
+                      cnpj: str, cnpj_credor: str, competencia: str,
+                      path_cnpj: Path,
+                      novo_cnpj: bool = True) -> None:
     keepalive(driver)
 
     logger.info(f"\n{'=' * 60}")
@@ -548,36 +589,40 @@ def processar_empresa(driver, wdw, req, cnpj: str, competencia: str, novo_cnpj: 
         ok = selecionar_empresa(driver, wdw, cnpj)
         if not ok:
             logger.error(f"Pulando CNPJ {cnpj} — não foi possível selecionar.")
-            return []
+            return None
 
     garantir_sem_backdrop(driver, wdw)
 
     # ← sempre executa, independente de novo_cnpj
     acessar_servicos_tomados(driver)
     preencher_filtro_periodo(driver, competencia)
+    preencher_credor_desejado(driver, cnpj_credor)
     clicar_consultar(driver, wdw, req)
 
     teve_aviso = remover_aviso(driver, wdw)
 
     if teve_aviso:
         logger.info("Consulta sem notas fiscais.")
-        return []
+        return None
 
     ajustar_paginacao(driver, wdw, "50")
 
-    notas = extrair_todas_paginas(driver, wdw)
-    logger.info(f"  → {len(notas)} notas extraídas para {cnpj} na competência {competencia}")
+    configurar_download_dir(driver, path_cnpj)
+
+
+    total_pdfs = extrair_todas_paginas(driver, wdw, path_cnpj)
+    logger.info(f"  → {total_pdfs} PDF(s) baixado(s) para {cnpj} na competência {competencia}")
 
     pausa_humana(3.0, 7.0)
-    return notas
+    return None
 
 
 MES_INICIAL = 1
-MES_FINAL = 6
+MES_FINAL = 5
 
 
 def main():
-    req = SeleniumRequester(profile='Edge_03', download_dir=None)
+    req = SeleniumRequester(profile='Edge_02', download_dir=None)
     driver = req.get_driver()
     wdw = req.waiter(driver)
 
@@ -585,70 +630,62 @@ def main():
     fechar_modal(driver)
     fazer_login(driver)
 
-    empresas = extrair_empresas(driver, wdw, req)
+    empresas = pd.DataFrame({
+        'cnpj': ['01.637.593/0001-64', '54.409.926/0001-64', '54.434.073/0001-10', '55.611.386/0001-60']
+    })
 
-    dfs = []
+    cnpj_credor_desejado = "11.992.870/0001-00"
 
-    def salvar_notas(notas: list[dict], path_notas: Path, cnpj: str, mes: int) -> None:
-        if notas:
-            df_cnpj = pd.DataFrame(notas)
-            df_cnpj['cnpj_empresa'] = cnpj
-            df_cnpj.to_csv(
-                path_notas / f'competencia_{mes:02d}-2026.csv',
-                index=False,
-                sep=';'
-            )
-            dfs.append(df_cnpj)
-            logger.info(f"{cnpj} | {mes:02d}/2026: {len(notas)} notas salvas")
-        else:
-            logger.info(f"{cnpj} | {mes:02d}/2026: sem notas")
-
-    for emp in empresas:
+    for _, emp in empresas.iterrows():
         cnpj = emp['cnpj']
+
         cnpj_normalizado = normalizar_cnpj(cnpj)
-        path_cnpj = INPUT_DIR / cnpj_normalizado
-        arquivos_csv = list(path_cnpj.glob('competencia_*.csv'))
+
+        path_cnpj = INPUT_DIR / cnpj_normalizado / f"{cnpj_normalizado}_pdf"
+
+        arquivos_csv = list(path_cnpj.glob('competencia_*.pdf'))
+
         qtd_arquivos = len(arquivos_csv)
 
-        if path_cnpj.exists() and qtd_arquivos >= 6:
+        if path_cnpj.exists() and qtd_arquivos >= 5:
             logger.info(f'Pulando {cnpj} — {qtd_arquivos} competências já extraídas')
             continue
 
         path_cnpj.mkdir(parents=True, exist_ok=True)
 
-        empresa_logada = False  # ← controla se já fez login/seleção nesta empresa
-
         for mes in range(MES_INICIAL, MES_FINAL + 1):
 
-            arquivo_mes = path_cnpj / f'competencia_{mes:02d}-2026.csv'
+            arquivo_mes = path_cnpj / f'competencia_{mes:02d}-2026.pdf'
             if arquivo_mes.exists():
                 logger.info(f"  Pulando {cnpj} | {mes:02d}/2026 — já extraído")
                 continue
 
             try:
-                notas = processar_empresa(
+                processar_empresa(
                     driver, wdw, req,
                     cnpj,
                     competencia=f'{mes:02d}/2026',
-                    novo_cnpj=not empresa_logada,  # ← faz login só se ainda não logou
+                    path_cnpj=path_cnpj,
+                    novo_cnpj=(mes == MES_INICIAL),
+                    cnpj_credor=cnpj_credor_desejado
                 )
-                empresa_logada = True
-                salvar_notas(notas, path_cnpj, cnpj, mes)
+
+
 
             except (InvalidSessionIdException, WebDriverException) as e:
-                logger.error(e.message)
                 logger.error(f"Sessão inválida em {cnpj} {mes:02d}/2026 — reiniciando driver.")
                 driver, wdw = reiniciar_driver(req, driver)
-                empresa_logada = False  # ← força novo login no retry
 
+                # Retenta a mesma competência com novo_cnpj=True
                 try:
-                    notas = processar_empresa(
+                    processar_empresa(
                         driver, wdw, req, cnpj,
                         competencia=f'{mes:02d}/2026',
-                        novo_cnpj=True,  # ← sempre loga após reinício
+                        path_cnpj=path_cnpj,
+                        novo_cnpj=(mes == MES_INICIAL),
+                        cnpj_credor=cnpj_credor_desejado
                     )
-                    empresa_logada = True
-                    salvar_notas(notas, path_cnpj, cnpj, mes)
+
 
                 except Exception as e2:
                     logger.exception(f"Falhou após reinício: {e2}")
@@ -658,14 +695,10 @@ def main():
 
             pausa_humana(0.5, 1.5)
 
-    return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
-
 
 if __name__ == '__main__':
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s [%(levelname)s] %(message)s'
     )
-    df_final = main()
-
-    df_final.to_csv(INPUT_DIR / "df_final.csv", index=False, sep=';')
+    main()

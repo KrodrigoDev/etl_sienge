@@ -36,7 +36,23 @@ dim_credor_receita = pd.read_csv(OUTPUT_DIR / 'dim_credor_receita.csv', sep=';')
 
 df_sienge = pd.merge(df_titulo, dim_credor_receita, on='credor', how='left')
 
-files = (INPUT_DIR / 'servico_tomado' / '12.06.2026').rglob('*.csv*') # alterar a data sempre que for atualizar
+files = (INPUT_DIR / 'servico_tomado' / '19.06.2026').rglob('*.csv*')  # alterar a data sempre que for atualizar
+
+for file in files:
+    try:
+        df = pd.read_csv(file, sep=';', decimal=',')
+
+        # Verifica se a coluna existe e se todos os valores estão vazios
+        if 'valor' in df.columns and df['valor'].isna().all():
+            file.unlink()  # apaga o arquivo
+            print(f'Arquivo removido: {file}')
+
+    except Exception as e:
+        print(f'Erro ao processar {file}: {e}')
+
+
+breakpoint()
+
 df_giss = pd.concat([pd.read_csv(f, sep=';', decimal=',') for f in files],
                     ignore_index=True, )
 
@@ -389,7 +405,6 @@ if not df_matched.empty:
     print(f"\nDistribuição de score_label:")
     print(df_matched['score_label'].value_counts().to_string())
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # FAIXA DE ANTIGUIDADE
 # Calculada com base na data de emissão vs. hoje (data da carga).
@@ -416,7 +431,6 @@ df_only_giss['faixa_antiguidade'] = pd.cut(
 ).astype(str)
 
 df_only_giss = df_only_giss.drop(columns='_emissao_dt')
-
 
 hoje = date.today().isoformat()
 df_only_giss['data_carga'] = hoje
