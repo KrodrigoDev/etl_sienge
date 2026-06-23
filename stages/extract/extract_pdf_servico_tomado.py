@@ -37,7 +37,7 @@ pasta_origem = Path(__file__).resolve().parents[2]
 
 dia_extracao = datetime.now().strftime("%d.%m.%Y")
 
-INPUT_DIR = pasta_origem / 'stages' / 'transform' / 'input' / 'servico_tomado' / "12.06.2026"
+INPUT_DIR = pasta_origem / 'stages' / 'transform' / 'input' / 'servico_tomado' / "24.06.2026"
 INPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -63,6 +63,15 @@ def reiniciar_driver(req, driver):
 
 def normalizar_cnpj(cnpj: str) -> str:
     return re.sub(r'\D', '', cnpj)
+
+
+def sanitizar_nome_path(nome: str) -> str:
+    """Remove/substitui caracteres inválidos em nomes de pasta (Windows e Linux)."""
+    # Caracteres proibidos no Windows: \ / : * ? " < > |
+    nome = re.sub(r'[\\/:*?"<>|]', '_', nome)
+    # Remove espaços e pontos no final (Windows não permite)
+    nome = nome.rstrip(' .')
+    return nome
 
 
 def pausa_humana(minimo: float = 1.0, maximo: float = 3.5) -> None:
@@ -247,7 +256,6 @@ def garantir_sem_backdrop(driver, wdw, timeout: int = 10) -> bool:
         return True
 
 
-
 def selecionar_empresa(driver, wdw, cnpj: str) -> bool:
     """Clica no botão 'Selecionar Empresa' para o CNPJ informado."""
 
@@ -349,16 +357,23 @@ def ajustar_paginacao(driver, wdw, tamanho: str = "50") -> None:
     pausa_humana(1.5, 3.0)
 
 
-def baixar_pdfs_pagina(driver, wdw, path_cnpj: Path, pagina: int) -> int:
+def baixar_pdfs_pagina(driver, wdw, path_cnpj: Path, pagina: int, nfs_desejadas: list | None = None) -> int:
     """
     Para cada linha visível na tabela, clica no botão 'Download PDF'
     (title='Download PDF') quando disponível.
+
+    Se `nfs_desejadas` for informado, baixa apenas as notas cujo número
+    de NFS-e esteja na lista.
 
     Aguarda o arquivo aparecer na pasta path_cnpj antes de seguir para o próximo.
     Retorna a quantidade de PDFs baixados na página.
     """
     XPATH_LINHAS = '//table[contains(@class,"table")]//tbody/tr[contains(@ng-repeat,"nota")]'
     XPATH_BTN_PDF = './/button[@title="Download PDF"]'
+
+    # Normaliza para conjunto de strings para comparação rápida
+    nfs_filtro = {str(n).strip() for n in nfs_desejadas} if nfs_desejadas is not None and len(
+        nfs_desejadas) > 0 else None
 
     linhas = driver.find_elements(By.XPATH, XPATH_LINHAS)
     logger.info(f"  {len(linhas)} nota(s) visíveis na página {pagina}.")
@@ -367,10 +382,18 @@ def baixar_pdfs_pagina(driver, wdw, path_cnpj: Path, pagina: int) -> int:
 
     for i, linha in enumerate(linhas):
         try:
+            # ── Filtro por número de NFS-e ────────────────────────────
+            if nfs_filtro is not None:
+                colunas = linha.find_elements(By.TAG_NAME, 'td')
+                numero_nfs = colunas[1].text.strip() if len(colunas) > 1 else ''
+                if numero_nfs not in nfs_filtro:
+                    logger.debug(f"  Linha {i + 1}: NFS {numero_nfs!r} não está na lista — pulando.")
+                    continue
+
             botoes_pdf = linha.find_elements(By.XPATH, XPATH_BTN_PDF)
 
             if not botoes_pdf:
-                logger.debug(f"  Linha {i+1}: sem botão PDF — pulando.")
+                logger.debug(f"  Linha {i + 1}: sem botão PDF — pulando.")
                 continue
 
             btn = botoes_pdf[0]
@@ -381,7 +404,7 @@ def baixar_pdfs_pagina(driver, wdw, path_cnpj: Path, pagina: int) -> int:
             scroll_humano(driver, btn)
             pausa_humana(0.3, 0.8)
             driver.execute_script("arguments[0].click();", btn)
-            logger.info(f"  Linha {i+1}: botão PDF clicado.")
+            logger.info(f"  Linha {i + 1}: botão PDF clicado.")
 
             # Aguarda novo arquivo aparecer na pasta (timeout de 30s)
             novo_arquivo = _aguardar_novo_pdf(path_cnpj, arquivos_antes, timeout=25)
@@ -390,13 +413,12 @@ def baixar_pdfs_pagina(driver, wdw, path_cnpj: Path, pagina: int) -> int:
                 logger.info(f"  PDF salvo: {novo_arquivo.name}")
                 baixados += 1
             else:
-                logger.warning(f"  Linha {i+1}: timeout aguardando PDF — seguindo.")
-
+                logger.warning(f"  Linha {i + 1}: timeout aguardando PDF — seguindo.")
 
             pausa_humana(0.5, 1.5)
 
         except Exception as e:
-            logger.warning(f"  Erro ao baixar PDF da linha {i+1}: {e}")
+            logger.warning(f"  Erro ao baixar PDF da linha {i + 1}: {e}")
 
     return baixados
 
@@ -417,6 +439,7 @@ def _aguardar_novo_pdf(pasta: Path, arquivos_antes: set, timeout: int = 30) -> P
         sleep(0.5)
     return None
 
+
 def configurar_download_dir(driver, pasta: Path) -> None:
     """
     Altera o diretório de download do Edge/Chrome em tempo de execução
@@ -433,7 +456,7 @@ def configurar_download_dir(driver, pasta: Path) -> None:
     logger.info(f"Download dir configurado: {pasta.resolve()}")
 
 
-def extrair_todas_paginas(driver, wdw, path_cnpj: Path) -> int:
+def extrair_todas_paginas(driver, wdw, path_cnpj: Path, nfs_desejadas: list | None = None) -> int:
     """
     Percorre todas as páginas de resultados e, em cada uma,
     clica no botão 'Download PDF' de cada nota disponível,
@@ -447,7 +470,7 @@ def extrair_todas_paginas(driver, wdw, path_cnpj: Path) -> int:
     while True:
         logger.info(f"  Processando página {pagina} — baixando PDFs...")
 
-        baixados_pagina = baixar_pdfs_pagina(driver, wdw, path_cnpj, pagina)
+        baixados_pagina = baixar_pdfs_pagina(driver, wdw, path_cnpj, pagina, nfs_desejadas=nfs_desejadas)
         total_baixados += baixados_pagina
 
         logger.info(f"  → {baixados_pagina} PDF(s) baixado(s) na página {pagina} | total: {total_baixados}")
@@ -465,9 +488,9 @@ def extrair_todas_paginas(driver, wdw, path_cnpj: Path) -> int:
         botao_proximo = botoes_proximo[0]
 
         desabilitado = (
-            botao_proximo.get_attribute("disabled") is not None
-            or not botao_proximo.is_enabled()
-            or "disabled" in (botao_proximo.find_element(By.XPATH, "..").get_attribute("class") or "")
+                botao_proximo.get_attribute("disabled") is not None
+                or not botao_proximo.is_enabled()
+                or "disabled" in (botao_proximo.find_element(By.XPATH, "..").get_attribute("class") or "")
         )
 
         if desabilitado:
@@ -571,7 +594,8 @@ def remover_aviso(driver, wdw, timeout_aviso: int = 5) -> bool:
 def processar_empresa(driver, wdw, req,
                       cnpj: str, cnpj_credor: str, competencia: str,
                       path_cnpj: Path,
-                      novo_cnpj: bool = True) -> None:
+                      novo_cnpj: bool = True,
+                      nfs: list | None = None) -> None:
     keepalive(driver)
 
     logger.info(f"\n{'=' * 60}")
@@ -609,8 +633,7 @@ def processar_empresa(driver, wdw, req,
 
     configurar_download_dir(driver, path_cnpj)
 
-
-    total_pdfs = extrair_todas_paginas(driver, wdw, path_cnpj)
+    total_pdfs = extrair_todas_paginas(driver, wdw, path_cnpj, nfs_desejadas=nfs)
     logger.info(f"  → {total_pdfs} PDF(s) baixado(s) para {cnpj} na competência {competencia}")
 
     pausa_humana(3.0, 7.0)
@@ -630,68 +653,71 @@ def main():
     fechar_modal(driver)
     fazer_login(driver)
 
-    empresas = pd.DataFrame({
-        'cnpj': ['01.637.593/0001-64', '54.409.926/0001-64', '54.434.073/0001-10', '55.611.386/0001-60']
-    })
+    files_credores = Path('../extract/reference/extracoes_pdfs/').glob('*.csv*')
 
-    cnpj_credor_desejado = "11.992.870/0001-00"
+    for file_credor in files_credores:
 
-    for _, emp in empresas.iterrows():
-        cnpj = emp['cnpj']
+        df_credor = pd.read_csv(file_credor, sep=',')
+        df_credor['Competência'] = pd.to_datetime(df_credor['Competência'])
 
-        cnpj_normalizado = normalizar_cnpj(cnpj)
+        cnpj_credor_desejado = df_credor['CNPJ prestador'].unique()
+        nome_prestador = sanitizar_nome_path(str(df_credor['Prestador'].iloc[0]).strip())
 
-        path_cnpj = INPUT_DIR / cnpj_normalizado / f"{cnpj_normalizado}_pdf"
+        # Itera por empresa → competência conforme o CSV (sem varrer meses desnecessários)
+        grupos = df_credor.groupby(['CNPJ empresa', 'Empresa', 'Competência'], sort=False)
 
-        arquivos_csv = list(path_cnpj.glob('competencia_*.pdf'))
+        primeiro_do_arquivo = True
+        for (cnpj, nome_empresa_raw, competencia_dt), df_grupo in grupos:
 
-        qtd_arquivos = len(arquivos_csv)
+            nome_empresa = sanitizar_nome_path(str(nome_empresa_raw).strip())
+            competencia_str = competencia_dt.strftime('%m/%Y')
 
-        if path_cnpj.exists() and qtd_arquivos >= 5:
-            logger.info(f'Pulando {cnpj} — {qtd_arquivos} competências já extraídas')
-            continue
+            path_cnpj = INPUT_DIR / nome_empresa / nome_prestador
+            path_cnpj.mkdir(parents=True, exist_ok=True)
 
-        path_cnpj.mkdir(parents=True, exist_ok=True)
+            # NFS esperadas para este grupo (empresa + competência)
+            nfs_grupo = df_grupo['NFS-e'].astype(str).str.strip().tolist()
+            qtd_esperada = len(nfs_grupo)
 
-        for mes in range(MES_INICIAL, MES_FINAL + 1):
+            # PDFs já baixados para as NFS deste grupo
+            pdfs_baixados = {p.stem for p in path_cnpj.glob('*.pdf')}
+            nfs_faltando = [n for n in nfs_grupo if n not in pdfs_baixados]
 
-            arquivo_mes = path_cnpj / f'competencia_{mes:02d}-2026.pdf'
-            if arquivo_mes.exists():
-                logger.info(f"  Pulando {cnpj} | {mes:02d}/2026 — já extraído")
+            if not nfs_faltando:
+                logger.info(f"  Pulando {cnpj} | {competencia_str} — {qtd_esperada}/{qtd_esperada} PDFs já baixados.")
                 continue
 
-            try:
+            logger.info(
+                f"  {cnpj} | {competencia_str} — {qtd_esperada - len(nfs_faltando)}/{qtd_esperada} baixados; "
+                f"faltam: {nfs_faltando}"
+            )
+
+            def _processar(novo_cnpj_flag):
                 processar_empresa(
                     driver, wdw, req,
                     cnpj,
-                    competencia=f'{mes:02d}/2026',
+                    competencia=competencia_str,
                     path_cnpj=path_cnpj,
-                    novo_cnpj=(mes == MES_INICIAL),
-                    cnpj_credor=cnpj_credor_desejado
+                    novo_cnpj=novo_cnpj_flag,
+                    cnpj_credor=cnpj_credor_desejado,
+                    nfs=nfs_faltando,
                 )
 
-
+            try:
+                _processar(novo_cnpj_flag=primeiro_do_arquivo)
+                primeiro_do_arquivo = False
 
             except (InvalidSessionIdException, WebDriverException) as e:
-                logger.error(f"Sessão inválida em {cnpj} {mes:02d}/2026 — reiniciando driver.")
+                logger.error(f"Sessão inválida em {cnpj} {competencia_str} — reiniciando driver.")
                 driver, wdw = reiniciar_driver(req, driver)
-
-                # Retenta a mesma competência com novo_cnpj=True
                 try:
-                    processar_empresa(
-                        driver, wdw, req, cnpj,
-                        competencia=f'{mes:02d}/2026',
-                        path_cnpj=path_cnpj,
-                        novo_cnpj=(mes == MES_INICIAL),
-                        cnpj_credor=cnpj_credor_desejado
-                    )
-
-
+                    _processar(novo_cnpj_flag=True)
+                    primeiro_do_arquivo = False
                 except Exception as e2:
                     logger.exception(f"Falhou após reinício: {e2}")
 
             except Exception as e:
-                logger.exception(f"Erro ao processar {cnpj} competência {mes:02d}/2026: {e}")
+                logger.exception(f"Erro ao processar {cnpj} competência {competencia_str}: {e}")
 
             pausa_humana(0.5, 1.5)
 

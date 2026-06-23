@@ -43,6 +43,7 @@ stages/transform/output/
 
 stages/rpa/files/input/
 stages/rpa/files/output/
+stages/extract/reference/extracoes_pdfs/
 
 
 stages/extract/reference/extrato_empreendimentos.xls
