@@ -94,6 +94,7 @@ COLS_ACOMPANHAMENTO_ANTES: list[str] = [
 COLS_ACOMPANHAMENTO_DEPOIS: list[str] = [
     # ── Calculados após o pivot (soma das colunas mensais) ─────────────────
     "valor_liquido_total",  # soma histórica de todos os *_liquido
+    "valor_bruto_total", # soma histórica de todos os *_bruto
     "pct_repasse",  # percentual de repasse do centro
     "valor_liquido_repasse",  # soma histórica de todos os *_repasse
     "valor_a_repassar",
@@ -416,7 +417,6 @@ def carregar_extrato(nome_empreendimento: str) -> set[str]:
     df["nome_up"] = df["nome_mutuario"].astype(str).str.strip().str.upper()
     chave = re.escape(nome_empreendimento.upper()[:15])
 
-
     df = df[df["empreendimento"].astype(str).str.upper().str.contains(chave, regex=True)]
     ini, fim, label = _mes_anterior()
     mask = (df["dt_cri"].dt.date >= ini) & (df["dt_cri"].dt.date <= fim)
@@ -452,8 +452,6 @@ def ler_vgv_clientes() -> pd.DataFrame:
 
 def ler_contas_a_receber() -> pd.DataFrame:
     files = (BASE_INPUT_DIR / "contas_a_receber").glob("*.xlsx*")
-
-
 
     arquivos = []
 
@@ -841,6 +839,16 @@ def _salvar_acompanhamento(
         "valor_liquido_repasse": "liquido"
     })
 
+    # ── NOVO: clientes novos têm seu valor consolidado no mês de liberação ──
+    # O fechamento traz o histórico completo deles, mas a regra de negócio é
+    # que o repasse ocorre integralmente no mês corrente (mês de liberação).
+    # Forçamos dt_baixa para o 1º dia do mês anterior (mês do fechamento).
+    ini_fechamento, _, _ = _mes_anterior()
+    mes_liberacao = pd.Timestamp(ini_fechamento)
+
+    mask_novos = df_sin_fechamento["novo_cliente"] == "S"
+    df_sin_fechamento.loc[mask_novos, "dt_baixa"] = mes_liberacao
+
     df_pivot, col_map = _construir_pivot_mensal(df_sin_fechamento)
 
     if df_pivot.empty:
@@ -849,10 +857,12 @@ def _salvar_acompanhamento(
         return
 
     # ── 2. Totais históricos ──────────────────────────────────────────────────
-    cols_liq = [c for c in df_pivot.columns if c.endswith("_bruto")]
+    cols_liq = [c for c in df_pivot.columns if c.endswith("_liquido")]
+    cols_bruto = [c for c in df_pivot.columns if c.endswith("_bruto")]
     df_pivot["valor_liquido_total"] = df_pivot[cols_liq].sum(axis=1)
+    df_pivot["valor_bruto_total"] = df_pivot[cols_bruto].sum(axis=1)
     df_pivot["pct_repasse"] = pct
-    df_pivot["valor_liquido_repasse"] = (df_pivot["valor_liquido_total"] * pct).round(2)
+    df_pivot["valor_liquido_repasse"] = (df_pivot["valor_bruto_total"] * pct).round(2)
 
     # ── 3. Merge CR (1 linha por titulo — sem inflação) ───────────────────────
     cr = (
@@ -867,16 +877,17 @@ def _salvar_acompanhamento(
 
     # ── 4. Métricas derivadas ─────────────────────────────────────────────────
     df_pivot["contrato_total"] = (
-            df_pivot["valor_liquido_total"] + df_pivot["carteira_total"].fillna(0)
+            df_pivot["valor_bruto_total"] + df_pivot["carteira_total"].fillna(0)
     )
     df_pivot["check"] = (
-            df_pivot["contrato_total"] - df_pivot["vgv_vendido"].fillna(0)
+            df_pivot["valor_bruto_total"] - df_pivot["vgv_vendido"].fillna(0)
     )
+
+    # validação essas questões do check e outros valores que mudaram com adição do valor_bruto_total
 
     df_pivot["total_por_cliente"] = (df_pivot["vgv_vendido"] * pct).round(2)
 
     df_pivot['valor_a_repassar'] = (df_pivot["total_por_cliente"] - df_pivot['valor_liquido_repasse'])
-
 
     df_pivot = df_pivot.rename(columns={
         "liquido": "bruto",
@@ -994,7 +1005,7 @@ def _salvar_acompanhamento(
     # ── Larguras ──────────────────────────────────────────────────────────────
     larguras_fixas = {
         "cliente": 38, "titulo": 12, "novo_cliente": 8,
-        "valor_liquido_total": 18, "valor_liquido_repasse": 18,
+        "valor_liquido_total": 18, "valor_bruto_total": 18, "valor_liquido_repasse": 18,
         "contrato_total": 16, "check": 14, "vgv_vendido": 16,
         "inadimplente": 16, "a_vencer": 14, "carteira_total": 16,
         "pct_repasse": 10,
@@ -1408,7 +1419,6 @@ def main() -> None:
 
     resultados = []
     contas_a_receber = ler_contas_a_receber()
-
 
     comp = _obter_competencia()
     print(comp)
